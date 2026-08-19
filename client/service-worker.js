@@ -3,7 +3,7 @@
 // Strategy: cache-first for our own GET assets, falling back to the network and
 // caching what it fetches. WebSocket sync traffic is untouched.
 
-const CACHE = "siano-shell-v3";
+const CACHE = "siano-shell-v4";
 const SHELL = [
   "/",
   "/index.html",
@@ -22,6 +22,10 @@ const SHELL = [
   "/js/store/oplog.js",
   "/js/sync/client.js",
   "/js/ui/board.js",
+  "/js/ui/boardview.js",
+  "/js/ui/viewstate.js",
+  "/js/ui/selection.js",
+  "/js/ui/interactions.js",
 ];
 
 self.addEventListener("install", (e) => {

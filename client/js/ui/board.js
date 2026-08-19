@@ -1,23 +1,46 @@
-// Minimal board renderer.
+// The board renderer: paints every dynamic region from the folded snapshot.
 //
-// This is a FUNCTIONAL scaffold of the UI, not the finished game-like board.
-// It renders straight from the folded snapshot and proves the whole local-first
-// loop end to end: edit -> op -> log -> fold -> snapshot -> render, synced live
-// across devices. The pannable/zoomable board, draggable traveller tokens and
-// drag-to-split gestures from the reference app are a follow-up (their hooks in
-// the siano repo's assets/js are largely portable); everything they need is
-// already here in the reducer and snapshot.
+// A faithful port of the reference app's game-like board (its
+// lib/siano_web/live/trip_live/sections/*.heex templates). Where the reference
+// let LiveView + morphdom patch server-rendered HTML in place, here we repaint
+// the dynamic regions from the local snapshot — but the two things a repaint
+// must never disturb (the board's pan/zoom and the drawers' open state) live on
+// <html> (see boardview.js / viewstate.js), so a full repaint is safe.
+//
+// The regions:
+//   • top bar    — trip name chip, bill count, running total
+//   • #board-canvas — the open meal cards, positioned in canvas coordinates
+//   • #dock      — the draggable traveller tokens
+//   • Bills drawer, Settings drawer, Report overlay contents
+//
+// Pointer gestures (drag-to-split, card drag, pan/zoom, long-press, edge-swipe)
+// are wired once in interactions.js by event delegation, so they survive every
+// repaint without re-binding.
 
-import { format, parse } from "../core/money.js";
+import { format } from "../core/money.js";
+import { selectedMember } from "./selection.js";
 
+// ── Per-viewer UI state (the reference held some of this server-side) ─────────
+export const ui = {
+  billsFilter: null, // member id, or null for "all bills"
+  billsSort: "created_asc",
+  editingShare: null, // "mealId:memberId" while a share is being typed
+  ledgerMember: null, // which traveller the personal ledger is showing
+};
+
+// ── DOM helper ────────────────────────────────────────────────────────────────
 function el(tag, props = {}, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
-    if (v == null) continue;
+    if (v == null || v === false) continue;
     if (k === "class") n.className = v;
     else if (k === "text") n.textContent = v;
+    else if (k === "html") n.innerHTML = v;
     else if (k === "value") n.value = v;
+    else if (k === "dataset") for (const [dk, dv] of Object.entries(v)) { if (dv != null) n.dataset[dk] = dv; }
+    else if (k === "style") n.setAttribute("style", v);
     else if (k.startsWith("on") && typeof v === "function") n.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (v === true) n.setAttribute(k, "");
     else n.setAttribute(k, v);
   }
   for (const kid of kids.flat()) {
@@ -28,149 +51,466 @@ function el(tag, props = {}, ...kids) {
 }
 
 const signed = (cents) => (cents > 0 ? "+" : "") + format(cents);
+const toneClass = (c) => (c > 0 ? "tone-pos" : c < 0 ? "tone-neg" : "tone-zero");
 
-function balancesPanel(snap) {
-  const rows = snap.budgets.map((b) =>
-    el("div", { class: "bal-row" },
-      el("span", { class: "bal-name", text: b.name || "—" }),
-      el("span", {
-        class: "bal-amt " + (b.balanceCents > 0 ? "pos" : b.balanceCents < 0 ? "neg" : ""),
-        text: signed(b.balanceCents),
-      }),
-    ));
-  const settle = snap.settlements.map((s) =>
-    el("li", { text: `${s.from} → ${s.to}: ${format(s.amountCents)}` }));
-
-  return el("section", { class: "panel" },
-    el("div", { class: "panel-head" },
-      el("span", { text: `${snap.budgetCount} budget${snap.budgetCount === 1 ? "" : "s"}` }),
-      el("span", { class: "total", text: `total ${format(snap.totalCents)}` }),
-    ),
-    el("div", { class: "bals" }, ...rows),
-    snap.settlements.length ? el("ul", { class: "settle" }, ...settle) : null,
-  );
+// ── Trash / grip icons as small SVGs ──────────────────────────────────────────
+function trashIcon() {
+  const svg = el("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2" });
+  svg.innerHTML =
+    '<path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m2 0v12a1 1 0 01-1 1H7a1 1 0 01-1-1V7"/>';
+  return svg;
 }
 
-function memberChip(m, actions, { active, onClick, removable } = {}) {
-  return el("span", {
-    class: "chip" + (active ? " chip--on" : ""),
-    style: m.color ? `--chip:${m.color}` : null,
-    title: m.name,
-    onClick: onClick || null,
+// ── Meal card ─────────────────────────────────────────────────────────────────
+function mealCard(meal, snap, actions) {
+  // header: grip + emoji (both drag handles), name, close
+  const head = el("div", { class: "meal-head" },
+    el("span", { class: "drag-handle drag-grip", title: "Drag to move" }, "⠿"),
+    el("span", { class: "drag-handle drag-emoji", title: "Drag to move" }, meal.emoji || "🍽️"),
+    el("input", {
+      class: "meal-name", value: meal.name, placeholder: "Meal name", "aria-label": "Meal name",
+      title: "Tap to rename", autocomplete: "off",
+      onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } },
+      onchange: (e) => actions.setMealName(meal.id, e.target.value),
+    }),
+    el("button", { class: "meal-close", title: "Close card (kept in Bills history)", onclick: () => actions.closeMeal(meal.id) }, "✕"),
+  );
+
+  // total row
+  const badge = meal.hasCustomShares
+    ? el("span", { class: "per-head" }, "custom 📌")
+    : meal.perHeadCents > 0
+      ? el("span", { class: "per-head" }, `${format(meal.perHeadCents)}/head`)
+      : null;
+  const total = el("div", { class: "meal-total" },
+    el("span", { class: "label" }, "Total"),
+    el("input", {
+      class: "amount-input siano-amount", inputmode: "decimal", "aria-label": "total",
+      value: meal.amountCents > 0 ? format(meal.amountCents) : "", placeholder: "0.00",
+      autocomplete: "off", dataset: { mealId: meal.id },
+      onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } },
+      onchange: (e) => actions.setAmountStr(meal.id, e.target.value),
+    }),
+    badge,
+  );
+
+  // participants
+  const rows = meal.participants.map((p) => {
+    const key = `${meal.id}:${p.id}`;
+    const payerBtn = el("button", {
+      type: "button", class: "payer-btn" + (p.isPayer ? " is-payer" : ""), title: "Mark as payer",
+      onclick: () => actions.setPayer(meal.id, p.id),
+    }, p.isPayer ? "💳" : (p.initials || "?"));
+
+    const body = ui.editingShare === key
+      ? el("form", { class: "share-form", onsubmit: (e) => { e.preventDefault(); const v = e.target.elements.value.value; actions.saveShare(meal.id, p.id, v); } },
+          el("input", {
+            class: "share-edit", name: "value", inputmode: "decimal",
+            value: p.locked ? format(p.shareCents) : "", placeholder: format(p.shareCents),
+            autocomplete: "off", "data-autofocus": "1",
+            onblur: (e) => actions.saveShare(meal.id, p.id, e.target.value),
+          }),
+        )
+      : el("div", { class: "pbody", title: "Hold to set an exact share", dataset: { longpress: "1", mealId: meal.id, memberId: p.id } },
+          el("span", { class: "pname" }, p.name),
+          el("span", { class: "pshare" }, format(p.shareCents)),
+          p.locked ? el("span", { class: "pin", title: "Custom share" }, "📌") : null,
+        );
+
+    const chip = el("div", { class: "pchip animate-pop", style: `background-color:${p.color}`, title: `${p.name} · ${format(p.shareCents)}${p.isPayer ? " · paid" : ""}` },
+      payerBtn, body,
+      el("button", { type: "button", class: "premove", title: "Remove from meal", onclick: () => actions.toggleParticipant(meal.id, p.id, false) }, "✕"),
+    );
+
+    const diff = p.isPayer && meal.allSharesFixed
+      ? el("span", { class: "diff-badge animate-pop", title: "Bill total minus everyone's declared shares — aim for 0.00" }, signed(meal.diffCents))
+      : null;
+
+    return el("div", { class: "participant-row" }, chip, diff);
+  });
+
+  const dropzone = el("div", { class: "dropzone" },
+    meal.participants.length === 0 ? el("p", { class: "hint" }, "drop travellers here") : null,
+    el("div", { class: "participants" }, ...rows),
+  );
+
+  const foot = el("div", { class: "meal-foot" },
+    el("button", {
+      type: "button", class: "delete", title: "Delete bill", "aria-label": `Delete ${meal.name}`,
+      dataset: { confirm: `Delete “${meal.name || "this bill"}” permanently? This removes its cost from everyone's balance.`, confirmAction: `deleteMeal:${meal.id}` },
+    }, trashIcon()),
+  );
+
+  return el("article", {
+    class: "meal-card animate-pop", style: `left:${meal.x}px; top:${meal.y}px;`,
+    dataset: { mealId: meal.id, x: meal.x, y: meal.y },
   },
-    el("span", { class: "chip-name", text: m.name || "?" }),
-    removable
-      ? el("button", {
-          class: "chip-x", type: "button", title: "Remove",
-          onClick: (e) => { e.stopPropagation(); actions.removeMember(m.id); },
-        }, "×")
-      : null,
+    head, total, dropzone,
+    meal.participants.length ? el("p", { class: "meal-hint" }, "hold a name to set an exact share · 💳 marks who paid") : null,
+    foot,
+    conflictNote(meal.conflicts),
   );
 }
 
-function membersStrip(snap, actions) {
-  const chips = snap.members.map((m) =>
-    el("span", { class: "chip chip--edit", style: m.color ? `--chip:${m.color}` : null },
-      el("input", {
-        class: "chip-input", value: m.name, "aria-label": "traveller name",
-        onChange: (e) => actions.setMemberName(m.id, e.target.value),
-      }),
-      el("button", {
-        class: "chip-x", type: "button", title: "Remove traveller",
-        onClick: () => actions.removeMember(m.id),
-      }, "×"),
-    ));
-  return el("section", { class: "strip" }, ...chips,
-    snap.members.length === 0 ? el("p", { class: "empty", text: "Add a traveller to start." }) : null);
-}
-
-function conflictChip(conflicts) {
+function conflictNote(conflicts) {
   if (!conflicts) return null;
   const bits = [];
   if (conflicts.amount) bits.push(`total also set to ${conflicts.amount.map((c) => format(c.value)).join(", ")}`);
   if (conflicts.shares) {
-    for (const [mid, cs] of Object.entries(conflicts.shares)) {
+    for (const cs of Object.values(conflicts.shares)) {
       bits.push(`a share also set to ${cs.map((c) => format(c.cents)).join(", ")}`);
     }
   }
-  return el("div", { class: "conflict", title: "Two people set this at once — pick one." },
-    "⚠ " + bits.join("; "));
+  return el("div", { class: "conflict", title: "Two people set this at once — pick one." }, "⚠ " + bits.join("; "));
 }
 
-function mealCard(meal, snap, actions) {
-  const payerSelect = el("select", {
-    class: "payer",
-    onChange: (e) => actions.setPayer(meal.id, e.target.value || null),
+// ── Dock ────────────────────────────────────────────────────────────────────
+function travellerToken(m) {
+  return el("div", {
+    class: "traveller-token animate-pop" + (m.id === selectedMember ? " is-selected" : ""),
+    dataset: { memberId: m.id },
   },
-    el("option", { value: "", text: "who paid?" }),
-    ...snap.members.map((m) => {
-      const o = el("option", { value: m.id, text: m.name });
-      if (m.id === meal.payerId) o.selected = true;
-      return o;
-    }));
-
-  const participantToggles = snap.members.map((m) => {
-    const on = meal.participantIds.includes(m.id);
-    return memberChip(m, actions, {
-      active: on,
-      onClick: () => actions.toggleParticipant(meal.id, m.id, !on),
-    });
-  });
-
-  const shareRows = meal.participants.map((p) => {
-    const lockBtn = el("button", {
-      class: "lock" + (p.locked ? " lock--on" : ""), type: "button",
-      title: p.locked ? "Unlock (back to auto split)" : "Lock this share",
-      onClick: () => actions.setShare(meal.id, p.id, p.locked ? null : p.shareCents),
-    }, p.locked ? "🔒" : "🔓");
-    const amt = p.locked
-      ? el("input", {
-          class: "share-input", value: format(p.shareCents), inputmode: "decimal",
-          onChange: (e) => {
-            const r = parse(e.target.value);
-            if (r.ok) actions.setShare(meal.id, p.id, r.cents);
-          },
-        })
-      : el("span", { class: "share-amt", text: format(p.shareCents) });
-    return el("div", { class: "share" },
-      el("span", { class: "share-name", text: p.name + (p.isPayer ? " (paid)" : "") }),
-      amt, lockBtn);
-  });
-
-  return el("article", { class: "meal" },
-    el("div", { class: "meal-head" },
-      el("input", {
-        class: "meal-name", value: meal.name, placeholder: "Bill name",
-        onChange: (e) => actions.setMealName(meal.id, e.target.value),
-      }),
-      el("input", {
-        class: "meal-amt", value: meal.amountCents ? format(meal.amountCents) : "",
-        placeholder: "0.00", inputmode: "decimal", "aria-label": "total",
-        onChange: (e) => {
-          const r = parse(e.target.value);
-          if (r.ok) actions.setAmount(meal.id, r.cents);
-        },
-      }),
-      el("button", { class: "meal-x", type: "button", title: "Delete bill", onClick: () => actions.removeMeal(meal.id) }, "×"),
-    ),
-    payerSelect,
-    el("div", { class: "toggles" }, ...participantToggles),
-    shareRows.length ? el("div", { class: "shares" }, ...shareRows) : null,
-    meal.diffCents && meal.allSharesFixed
-      ? el("div", { class: "diff", text: `off by ${format(meal.diffCents)} — reconcile to 0` })
-      : null,
-    conflictChip(meal.conflicts),
+    el("span", { class: "avatar", style: `background-color:${m.color}` }, m.initials || "?"),
+    el("span", { class: "traveller-name" }, m.name || "?"),
   );
 }
 
-/** Render the whole board into `root` from `snap`, wiring `actions`. */
-export function render(root, snap, actions) {
-  root.replaceChildren(
-    balancesPanel(snap),
-    membersStrip(snap, actions),
-    ...snap.meals.map((m) => mealCard(m, snap, actions)),
-    snap.meals.length === 0 && snap.members.length > 0
-      ? el("p", { class: "empty", text: "Add a bill to split." })
-      : null,
+// ── Bills drawer contents ─────────────────────────────────────────────────────
+const SORT_OPTIONS = [
+  ["Name (A–Z)", "name_asc"],
+  ["Name (Z–A)", "name_desc"],
+  ["Date added (oldest first)", "created_asc"],
+  ["Date added (newest first)", "created_desc"],
+  ["Amount (low to high)", "cash_asc"],
+  ["Amount (high to low)", "cash_desc"],
+];
+
+function sortBills(bills, sort) {
+  const by = (f) => [...bills].sort(f);
+  switch (sort) {
+    case "name_asc": return by((a, b) => (a.name || "").toLowerCase().localeCompare((b.name || "").toLowerCase()));
+    case "name_desc": return by((a, b) => (b.name || "").toLowerCase().localeCompare((a.name || "").toLowerCase()));
+    case "created_desc": return [...bills].reverse();
+    case "cash_asc": return by((a, b) => a.amountCents - b.amountCents);
+    case "cash_desc": return by((a, b) => b.amountCents - a.amountCents);
+    default: return bills; // created_asc = identity (bills arrive oldest first)
+  }
+}
+
+function renderSortMenu(actions) {
+  const box = document.getElementById("bills-sort-menu");
+  box.replaceChildren(
+    ...SORT_OPTIONS.map(([label, key]) =>
+      el("button", {
+        type: "button", class: ui.billsSort === key ? "active" : "",
+        onclick: () => actions.setBillsSort(key),
+      }, el("span", {}, label), ui.billsSort === key ? el("span", {}, "✓") : null)),
   );
+}
+
+function renderBills(snap, actions) {
+  renderSortMenu(actions);
+  const root = document.getElementById("bills-content");
+  const kids = [];
+
+  if (snap.members.length && snap.bills.length) {
+    kids.push(el("div", { class: "filter-pills" },
+      ...snap.members.map((m) =>
+        el("button", {
+          type: "button", class: "pill" + (ui.billsFilter === m.id ? " active" : ""),
+          onclick: () => actions.filterBills(m.id),
+        }, m.name)),
+    ));
+  }
+
+  if (snap.bills.length === 0) {
+    kids.push(el("p", { class: "card-note" }, "No bills yet — tap ➕ to add one."));
+  } else {
+    const filtered = ui.billsFilter
+      ? snap.bills.filter((b) => b.memberIds.includes(ui.billsFilter))
+      : snap.bills;
+    const list = el("ul", { class: "bills-list" },
+      ...sortBills(filtered, ui.billsSort).map((bill) => billRow(bill, actions)),
+    );
+    kids.push(list);
+  }
+
+  if (ui.billsFilter) {
+    const name = snap.members.find((m) => m.id === ui.billsFilter)?.name;
+    kids.push(el("p", { class: "card-note", style: "text-align:center" },
+      `Showing only ${name || "one traveller"}'s bills — tap their name again to see all.`));
+  }
+
+  root.replaceChildren(...kids);
+}
+
+function billRow(bill, actions) {
+  const people = `${bill.participantCount} ${bill.participantCount === 1 ? "person" : "people"}`;
+  const meta = people +
+    (bill.payerName ? ` · ${bill.payerName} paid` : "") +
+    (bill.complete ? "" : " · draft");
+  return el("li", { class: "bill-row" },
+    el("button", { type: "button", class: "bill-open", onclick: () => actions.openMeal(bill.id) },
+      el("span", { class: "emoji" }, bill.emoji || "🍽️"),
+      el("span", { class: "info" },
+        el("span", { class: "bname" }, bill.name || "Untitled"),
+        el("span", { class: "bmeta" }, meta),
+      ),
+      el("span", { class: "amt" },
+        el("span", { class: "money" }, format(bill.amountCents)),
+        el("span", { class: "state " + (bill.open ? "on" : "off") }, bill.open ? "on board" : "closed"),
+      ),
+    ),
+    el("button", {
+      type: "button", class: "bill-del", title: "Delete bill", "aria-label": `Delete ${bill.name}`,
+      dataset: { confirm: `Delete “${bill.name || "this bill"}” permanently? This removes its cost from everyone's balance.`, confirmAction: `deleteMeal:${bill.id}` },
+    }, "🗑"),
+  );
+}
+
+// ── Settings drawer contents ──────────────────────────────────────────────────
+function renderMenu(snap, actions) {
+  const root = document.getElementById("menu-content");
+  root.replaceChildren(
+    travellersSection(snap, actions),
+    budgetsSection(snap),
+    totalSection(snap),
+    settleSection(snap),
+    ledgerSection(snap, actions),
+    tripNameSection(snap, actions),
+    helpSection(),
+    disclaimerSection(),
+  );
+}
+
+function travellersSection(snap, actions) {
+  const items = snap.members.map((m) => {
+    const select = el("select", { class: "budget-select", onchange: (e) => actions.setMemberBudget(m.id, e.target.value) },
+      el("option", { value: m.id, selected: m.budgetSolo }, "on their own"),
+      ...snap.members.filter((o) => o.id !== m.id).map((o) =>
+        el("option", { value: o.id, selected: !m.budgetSolo && o.id === m.budgetPartnerId }, `shared with ${o.name}`)),
+    );
+    return el("li", { class: "member-item" },
+      el("div", { class: "member-top" },
+        el("span", { class: "mini-avatar", style: `background-color:${m.color}` }, m.initials || "?"),
+        el("input", { class: "member-name-input", value: m.name, "aria-label": "traveller name", onchange: (e) => actions.setMemberName(m.id, e.target.value) }),
+        el("button", {
+          type: "button", class: "x-btn", title: "Remove traveller",
+          dataset: { confirm: `Remove ${m.name} from the trip? Their meals and shares will be recalculated.`, confirmAction: `removeMember:${m.id}` },
+        }, "✕"),
+      ),
+      el("div", { class: "budget-row" }, el("span", { class: "lbl" }, "💰 budget"), select),
+      m.budgetSolo ? null : el("p", { class: "budget-note" }, `💰 shared budget: ${m.budgetName}`),
+    );
+  });
+
+  const addForm = el("form", { class: "add-row", onsubmit: (e) => { e.preventDefault(); const inp = e.target.elements.name; actions.addMember(inp.value); inp.value = ""; } },
+    el("input", { class: "text-input", name: "name", placeholder: "Add traveller…", autocomplete: "off" }),
+    el("button", { class: "btn" }, "Add"),
+  );
+
+  return el("section", {},
+    el("h3", {}, "Travellers"),
+    el("ul", { class: "member-list" }, ...items),
+    addForm,
+  );
+}
+
+function budgetsSection(snap) {
+  return el("section", {},
+    el("h3", {}, "Budgets ", el("span", { class: "muted" }, "(who owes whom)")),
+    el("ul", { class: "plain-list" },
+      ...snap.budgets.map((b) =>
+        el("li", { class: "budget-item" },
+          el("span", {}, b.size > 1 ? "👥" : "🙂"),
+          el("span", { class: "col" },
+            el("span", { class: "bn" }, b.name || "—"),
+            el("span", { class: "muted-note " + toneClass(b.balanceCents) },
+              b.balanceCents > 0 ? `is owed ${format(b.balanceCents)}` : b.balanceCents < 0 ? `owes ${format(-b.balanceCents)}` : "settled up"),
+          ),
+        )),
+    ),
+  );
+}
+
+function totalSection(snap) {
+  const sub = `${snap.memberCount} travellers` + (snap.budgetCount < snap.memberCount ? ` · ${snap.budgetCount} budgets` : "");
+  return el("section", {},
+    el("div", { class: "total-card" },
+      el("p", { class: "lbl" }, "Total tracked"),
+      el("p", { class: "big" }, format(snap.totalCents)),
+      el("p", { class: "sub" }, sub),
+    ),
+  );
+}
+
+function settleSection(snap) {
+  return el("section", {},
+    el("h3", {}, "Settle up"),
+    snap.settlements.length === 0
+      ? el("p", { class: "card-note" }, "Everyone's even — nothing to settle 🎉")
+      : el("ul", { class: "plain-list" },
+          ...snap.settlements.map((s) =>
+            el("li", { class: "settle-item" },
+              el("span", { class: "from" }, s.from),
+              el("span", { class: "arrow" }, "→"),
+              el("span", { class: "to" }, s.to),
+              el("span", { class: "money" }, format(s.amountCents)),
+            ))),
+  );
+}
+
+function ledgerSection(snap, actions) {
+  const picks = el("div", { class: "filter-pills" },
+    ...snap.members.map((m) =>
+      el("button", {
+        type: "button", class: "pill ledger-pick" + (m.id === ui.ledgerMember ? " is-me" : ""),
+        onclick: () => actions.pickLedger(m.id),
+      }, m.name)),
+  );
+
+  const me = snap.members.find((m) => m.id === ui.ledgerMember);
+  let block;
+  if (me) {
+    const pays = snap.settlements.filter((s) => s.from === me.budgetName);
+    const collects = snap.settlements.filter((s) => s.to === me.budgetName);
+    block = el("div", { class: "ledger-block" },
+      el("p", {}, "Hi ", el("span", { style: `color:${me.color};font-weight:700` }, me.name), " 👋"),
+      me.budgetName !== me.name ? el("p", { class: "muted-note" }, `budget: 💰 ${me.budgetName}`) : null,
+      el("p", { class: "big " + toneClass(me.balanceCents) },
+        me.balanceCents > 0 ? `You are owed ${format(me.balanceCents)}` : me.balanceCents < 0 ? `You owe ${format(-me.balanceCents)}` : "You're settled up"),
+      el("ul", {},
+        ...pays.map((s) => el("li", { class: "pay" }, el("span", {}, `pay ${s.to}`), el("span", { class: "font-mono" }, format(s.amountCents)))),
+        ...collects.map((s) => el("li", { class: "collect" }, el("span", {}, `collect from ${s.from}`), el("span", { class: "font-mono" }, format(s.amountCents)))),
+      ),
+    );
+  } else {
+    block = el("p", { class: "muted-note" }, "Pick who you are to see a personal breakdown.");
+  }
+
+  return el("section", {}, el("h3", {}, "Your ledger"), picks, block);
+}
+
+function tripNameSection(snap, actions) {
+  return el("section", {},
+    el("h3", {}, "Trip name"),
+    el("input", {
+      class: "text-input", value: snap.name, placeholder: "Name this trip…", "aria-label": "Trip name", autocomplete: "off",
+      onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } },
+      onchange: (e) => actions.setTripName(e.target.value),
+    }),
+    el("p", { class: "trip-id-note" }, "Trip ID: ", el("span", { class: "mono" }, snap.id)),
+    el("div", { class: "admin", style: "margin-top:0.75rem" },
+      el("button", { type: "button", class: "btn-block", onclick: () => actions.share() }, "🔗 Copy trip link"),
+      el("button", { type: "button", class: "btn-block", onclick: () => actions.newTrip() }, "✨ New trip"),
+    ),
+  );
+}
+
+function helpSection() {
+  return el("section", {},
+    el("button", { type: "button", class: "btn-block", "data-siano-help-open": "" }, "❓ How to use Siano"),
+  );
+}
+
+function disclaimerSection() {
+  return el("div", { class: "disclaimer" },
+    el("p", { class: "hd" }, "Disclaimer"),
+    el("p", {}, "Siano is provided for informational and convenience purposes only, with no warranty of any kind. It can make mistakes in its calculations, so figures here are estimates — not a financial record. Always verify amounts before settling up."),
+  );
+}
+
+// ── Report overlay ────────────────────────────────────────────────────────────
+function renderReport(snap) {
+  const root = document.getElementById("report-content");
+  const complete = snap.bills.filter((b) => b.complete);
+  const kids = [
+    el("p", { class: "report-intro" }, `${snap.billCount} bill${snap.billCount === 1 ? "" : "s"} · total tracked ${format(snap.totalCents)}`),
+  ];
+
+  if (complete.length === 0) {
+    kids.push(el("p", { class: "card-note" }, "No completed bills yet — a bill needs an amount, a payer and at least one traveller."));
+  } else {
+    const table = el("table", { class: "report" },
+      el("thead", {}, el("tr", {},
+        el("th", { class: "name" }, "Bill"),
+        el("th", {}, "Paid by"),
+        el("th", {}, "People"),
+        el("th", {}, "Amount"),
+      )),
+      el("tbody", {},
+        ...complete.map((b) => el("tr", {},
+          el("td", { class: "name" }, `${b.emoji || "🍽️"} ${b.name || "Untitled"}`),
+          el("td", {}, b.payerName || "—"),
+          el("td", {}, String(b.participantCount)),
+          el("td", {}, format(b.amountCents)),
+        ))),
+      el("tfoot", {}, el("tr", {},
+        el("td", { class: "name" }, "Total"),
+        el("td", {}, ""),
+        el("td", {}, ""),
+        el("td", {}, format(complete.reduce((s, b) => s + b.amountCents, 0))),
+      )),
+    );
+    kids.push(el("div", { class: "report-scroll" }, table));
+  }
+
+  // budget balances + settlements
+  kids.push(el("h3", { style: "margin-top:1.25rem" }, "Balances"));
+  kids.push(el("ul", { class: "plain-list" },
+    ...snap.budgets.map((b) =>
+      el("li", { class: "settle-item" },
+        el("span", { class: "from", style: "color:var(--slate-200)" }, b.name || "—"),
+        el("span", { class: "money " + toneClass(b.balanceCents) }, signed(b.balanceCents)),
+      )),
+  ));
+  if (snap.settlements.length) {
+    kids.push(el("h3", { style: "margin-top:1.25rem" }, "Settle up"));
+    kids.push(el("ul", { class: "plain-list" },
+      ...snap.settlements.map((s) =>
+        el("li", { class: "settle-item" },
+          el("span", { class: "from" }, s.from), el("span", { class: "arrow" }, "→"), el("span", { class: "to" }, s.to),
+          el("span", { class: "money" }, format(s.amountCents)),
+        ))));
+  }
+
+  root.replaceChildren(...kids);
+}
+
+// ── Top bar + focus restore ────────────────────────────────────────────────────
+function renderTopBar(snap) {
+  document.getElementById("trip-chip").textContent = snap.name || "Untitled trip";
+  document.getElementById("bill-count").textContent = String(snap.billCount);
+  document.getElementById("bill-word").textContent = snap.billCount === 1 ? "bill" : "bills";
+  document.getElementById("total").textContent = format(snap.totalCents);
+  document.title = snap.name ? `${snap.name} · Siano` : "Siano";
+}
+
+// ── Full paint ────────────────────────────────────────────────────────────────
+/**
+ * Repaint every dynamic region from `snap`, wiring `actions`. The pan/zoom
+ * transform (on <html>) and drawer state (on <html>) are untouched, so the
+ * board stays put and any open drawer stays open across a repaint.
+ */
+export function render(snap, actions) {
+  renderTopBar(snap);
+
+  const canvas = document.getElementById("board-canvas");
+  canvas.replaceChildren(...snap.meals.map((m) => mealCard(m, snap, actions)));
+  document.getElementById("board-empty").classList.toggle("hidden", snap.meals.length > 0);
+
+  const dock = document.getElementById("dock");
+  dock.replaceChildren(
+    ...(snap.members.length
+      ? snap.members.map((m) => travellerToken(m))
+      : [el("p", { class: "dock-empty" }, "No travellers yet — add some in ⚙️ Settings.")]),
+  );
+
+  renderBills(snap, actions);
+  renderMenu(snap, actions);
+  renderReport(snap);
+
+  // Autofocus a freshly-opened inline share editor.
+  const focusEl = canvas.querySelector("[data-autofocus]");
+  if (focusEl) { focusEl.focus(); if (focusEl.select) focusEl.select(); }
 }

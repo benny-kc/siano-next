@@ -124,10 +124,15 @@ Create ops via the `ops.js` constructors (they stamp the clock). Emit them throu
 | `client/js/store/idb.js` | Tiny promise wrapper over IndexedDB (dependency-free; Dexie-swappable). |
 | `client/js/store/oplog.js` | `OpLog` (pure) + `openTripStore` (IndexedDB-backed): the device's full copy. `emit`/`ingest`/`ingestMany`/`snapshot`/`subscribe`. |
 | `client/js/sync/client.js` | `SyncClient` — WebSocket to hub: hello-with-have, delta-on-reconnect, live fan-out. |
-| `client/js/ui/board.js` | `render(root, snap, actions)` — minimal functional board (full re-render). |
-| `client/js/app.js` | Entry: wires store + sync + UI; defines `actions`; **rAF-coalesced paint**. |
+| `client/js/ui/board.js` | `render(snap, actions)` — repaints the game-like board (meal cards), the dock, the top bar and the drawer/report contents from the snapshot. Holds per-viewer UI state (`ui`: bills filter/sort, inline-share edit, ledger pick). |
+| `client/js/ui/boardview.js` | `BoardView` — pan/zoom kept as CSS vars on `:root` (a repaint never resets the view) + screen↔canvas math. |
+| `client/js/ui/viewstate.js` | `View` — the drawers / help / report / sort-popover open state, kept as data-attrs on `:root` (survives repaints), plus system-Back integration. |
+| `client/js/ui/selection.js` | The "armed" traveller (single-select) shared by the renderer and gestures. |
+| `client/js/ui/interactions.js` | All pointer gestures wired ONCE by delegation on stable containers (survive repaints): pan/zoom, edge-swipe drawers, traveller drag-to-split, meal-card drag, long-press-to-set-share, and the in-page confirm dialog. |
+| `client/index.html`, `css/app.css` | The fixed-viewport shell (top bar / board / dock / drawers / help / confirm) and the full game-like styling — a buildless, plain-CSS port of the reference app's Tailwind + custom look. |
+| `client/js/app.js` | Entry: wires store + sync + UI; defines `actions`; **rAF-coalesced paint, also deferred while a drag/pan is in flight**. |
 | `client/js/log.js` | Operator-controlled client logging (see Logging). |
-| `client/index.html`, `css/app.css`, `manifest.webmanifest`, `service-worker.js` | PWA shell. |
+| `client/manifest.webmanifest`, `service-worker.js` | PWA manifest + offline-shell cache (bump `CACHE` + the `SHELL` list when adding a client module). |
 
 **Hub (dependency-free Node relay):**
 | Path | What |
@@ -204,6 +209,19 @@ Full detail in **docs/security.md**. Key points:
   flag is always live.
 - Client frames are masked; the hub's WS parser enforces it. Server→client frames
   are never masked.
+- **The board repaints wholesale, so anything a repaint must not disturb lives on
+  `<html>`, never inside a repainted region**: the pan/zoom transform (CSS vars,
+  `boardview.js`) and the drawer/help/report open state (data-attrs,
+  `viewstate.js`). This is the local-first equivalent of the reference relying on
+  morphdom never touching `<html>`. Gestures are likewise wired ONCE by delegation
+  on stable containers (`interactions.js`), not per-card, so they survive repaints.
+- **Never repaint mid-drag/mid-pan.** `app.js`'s `schedulePaint` defers while
+  `window.__sianoDragging` / `__sianoPanning` is set, or a remote op arriving
+  mid-gesture would yank the card out from under the finger. The same flags let a
+  real drag/pan suppress the drawer edge-swipe.
+- When calling `element.replaceChildren(...)` directly (not via the `el()` helper,
+  which filters them), **never pass a `null`/`false` child** — the DOM coerces it
+  to the literal text `"null"`. Filter first (this bit the dock once).
 
 ---
 
@@ -216,8 +234,13 @@ Full detail in **docs/security.md**. Key points:
   have the hub also reply with what it wants, or have the client push ops the hub
   is missing (it can diff `have` both directions, or just resend all local ops —
   they dedupe). Until fixed, ops made while fully offline may not propagate.
-- **Port the reference board**: pannable/zoomable board + drag-to-split gestures
-  (`assets/js/hooks/*` in the siano repo are largely portable) and the richer CSS.
+- **Board is ported** ✅ — the pannable/zoomable board, the traveller dock,
+  drag-to-split, draggable meal cards, long-press-to-set-share, the slide-in
+  Bills/Settings/Report drawers, help + in-page confirm, and the full game-like
+  CSS now live under `client/js/ui/*` + `client/{index.html,css/app.css}`
+  (buildless, plain-CSS port of the reference's Tailwind look). What remains from
+  the reference UI: bill **photos/OCR** (next item), the QR share code, the
+  first-run coach-mark hints, and the CSV report export.
 - **Photo/OCR blob channel**: log carries `photoId` + fields; bytes sync
   opportunistically; the OCR service stays server-side (`lib/siano/ocr.ex` in the
   reference).

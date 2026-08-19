@@ -2,35 +2,224 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
-    <meta name="theme-color" content="#0f172a" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
+    />
+    <meta name="theme-color" content="#020617" />
     <title>Siano</title>
     <link rel="icon" href="data:," />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" href="/css/app.css" />
   </head>
   <body>
-    <header id="bar">
-      <input id="trip-name" class="trip-name" type="text" placeholder="Untitled trip" autocomplete="off" />
-      <div class="bar-right">
-        <span id="net" class="net net--closed" title="sync status">offline</span>
-        <button id="share" class="ghost" type="button" title="Copy trip link">link</button>
+    <!--
+      The whole app is pinned to the viewport (#trip is `fixed inset-0`,
+      `overflow-hidden`) so the page never scrolls — that is what used to fight
+      the drag gesture. The board and the traveller dock are always on screen and
+      ready to drag. Everything else (managing travellers, totals, settle-up,
+      bills history, help) lives in a drawer that slides in from the side.
+
+      The three always-on regions and the drawer contents are painted from the
+      folded snapshot by js/ui/board.js; the drawer open/closed state and the
+      board pan/zoom live as data-attributes / CSS vars on <html>, so a repaint
+      never disturbs them (see js/ui/viewstate.js and js/ui/boardview.js).
+    -->
+    <div id="trip">
+      <!-- ─────────── Top bar (a left column in landscape) ─────────── -->
+      <header class="topbar">
+        <div class="topbar-summary" data-siano-open="bills" role="button" title="Bills history">
+          <div class="topbar-row">
+            <div class="topbar-title">
+              <span class="bag">🧳</span>
+              <span class="name-word">Siano</span>
+            </div>
+            <div id="trip-chip" class="trip-chip"></div>
+          </div>
+          <div class="topbar-meta">
+            <span class="count"><b id="bill-count">0</b> <span id="bill-word">bills</span></span>
+            <span class="dot">·</span>
+            <span id="total" class="total">0.00</span>
+            <span id="net" class="net net--closed" title="sync status">offline</span>
+          </div>
+        </div>
+
+        <div class="topbar-actions">
+          <button class="icon-btn" data-siano-open="bills" title="Bills history" aria-label="Bills history">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" d="M4 7h16M4 12h16M4 17h10" />
+            </svg>
+          </button>
+          <button id="add-meal" class="icon-btn icon-btn--primary" title="Add meal" aria-label="Add meal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+          <button class="icon-btn" data-siano-open="menu" title="Settings" aria-label="Open settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3.2" />
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-1.8-.3 1.6 1.6 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.6 1.6 0 00-1-1.5 1.6 1.6 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.6 1.6 0 00.3-1.8 1.6 1.6 0 00-1.5-1H3a2 2 0 110-4h.1a1.6 1.6 0 001.5-1 1.6 1.6 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.6 1.6 0 001.8.3H9a1.6 1.6 0 001-1.5V3a2 2 0 114 0v.1a1.6 1.6 0 001 1.5 1.6 1.6 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-.3 1.8V9a1.6 1.6 0 001.5 1H21a2 2 0 110 4h-.1a1.6 1.6 0 00-1.5 1z"
+              />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- ─────────── The game board (meals) ─────────── -->
+      <main id="board-surface" class="board-surface">
+        <p id="board-empty" class="board-empty hidden">
+          <span
+            >Drag a traveller up here to start a meal — or tap ➕. Then drop the
+            others onto it to split the bill 🍽️</span
+          >
+          <span class="sub">one finger to pan · two fingers / pinch to zoom</span>
+        </p>
+        <!-- Meal cards are rendered here, positioned in canvas coordinates. -->
+        <div id="board-canvas"></div>
+      </main>
+
+      <!-- ─────────── Traveller dock (always ready to drag) ─────────── -->
+      <footer class="dock-wrap">
+        <div class="dock-head">
+          <span class="lbl">Travellers</span>
+          <span class="tip">drag onto a meal ↑</span>
+        </div>
+        <div id="dock" class="dock"></div>
+      </footer>
+    </div>
+
+    <!-- ─────────── Bills history (slides in from the left) ─────────── -->
+    <div id="bills-backdrop" class="backdrop" data-siano-close></div>
+    <aside id="bills" class="drawer drawer--bills">
+      <div class="drawer-head">
+        <h2>🧾 Bills</h2>
+        <div class="tools">
+          <button id="bills-report-btn" class="round-btn" data-siano-report-open aria-label="Report">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke="currentColor">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M3.75 3.75h16.5v16.5H3.75zM3.75 9h16.5M3.75 14.25h16.5M9 9v11.25M14.25 9v11.25"
+              />
+            </svg>
+          </button>
+          <button id="bills-sort-btn" class="round-btn" data-siano-sortmenu aria-label="Sort bills" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke="currentColor">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"
+              />
+            </svg>
+          </button>
+          <button class="round-btn" data-siano-close aria-label="Close bills">✕</button>
+        </div>
       </div>
-    </header>
+      <div id="bills-sort-menu" class="sort-menu"></div>
+      <p class="muted-note">Tap a bill to open it on the board and edit it.</p>
+      <div id="bills-content"></div>
+    </aside>
 
-    <main id="app">
-      <!-- The board renders here from the folded snapshot. -->
-      <section id="board" class="board"></section>
-    </main>
+    <!-- ─────────── Settings drawer (slides in from the right) ─────────── -->
+    <div id="menu-backdrop" class="backdrop" data-siano-close></div>
+    <aside id="menu" class="drawer drawer--menu">
+      <div class="drawer-head">
+        <h2>⚙️ Settings</h2>
+        <button class="round-btn" data-siano-close aria-label="Close settings">✕</button>
+      </div>
+      <div id="menu-content"></div>
+    </aside>
 
-    <nav id="dock">
-      <button id="add-member" type="button">+ Traveller</button>
-      <button id="add-meal" type="button">+ Bill</button>
-    </nav>
+    <!-- ─────────── Report (a second left drawer, over Bills) ─────────── -->
+    <div id="report-backdrop" class="backdrop" data-siano-report-close></div>
+    <aside id="report" class="drawer drawer--report">
+      <div class="drawer-head">
+        <h2>📊 Report</h2>
+        <button class="round-btn" data-siano-report-close aria-label="Close report">✕</button>
+      </div>
+      <div id="report-content" class="report-body"></div>
+    </aside>
 
-    <!-- Operator-controlled debug flag, served by the hub from SIANO_CLIENT_DEBUG.
-         Absent when the client is opened without the hub → debug stays off.
-         A classic (blocking) script, so it runs before the deferred module below. -->
+    <!-- ─────────── Help / how-to ─────────── -->
+    <div id="help-modal">
+      <div class="confirm-backdrop" data-siano-help-close></div>
+      <div class="help-panel">
+        <div class="help-head">
+          <h2>❓ How to use Siano</h2>
+          <button class="round-btn" data-siano-help-close aria-label="Close help">✕</button>
+        </div>
+        <div class="help-body">
+          <p>
+            Siano splits a group trip's bills. Everyone who opens the trip's link sees the
+            <b>same live board</b> — share it from ⚙️ Settings.
+          </p>
+          <section>
+            <h3>🧑‍🤝‍🧑 Travellers</h3>
+            <ul>
+              <li>Add or remove travellers in <b>⚙️ Settings</b>.</li>
+              <li><b>Drag</b> a traveller onto a meal card to add them to that bill.</li>
+              <li>Drag one onto <b>empty board space</b> to start a new meal with them.</li>
+            </ul>
+          </section>
+          <section>
+            <h3>🍽️ Meals &amp; bills</h3>
+            <ul>
+              <li>Add a card with <b>➕</b> (top), or by dropping a traveller on empty space.</li>
+              <li><b>Move</b> a card by dragging the <b>⠿ grip</b> or its emoji.</li>
+              <li><b>Rename</b>: tap the title. <b>Total</b>: tap the amount and type.</li>
+              <li><b>Who paid</b>: tap a person's round chip → 💳 marks the payer.</li>
+              <li><b>Exact share</b>: press &amp; hold a person's name to type their amount (📌 = custom).</li>
+              <li><b>✕ Close</b> keeps the bill in history; <b>🗑 Delete</b> removes it.</li>
+            </ul>
+          </section>
+          <section>
+            <h3>🖐️ Moving the board</h3>
+            <ul>
+              <li><b>One finger</b> on empty space (or a card's blank body) drags the board.</li>
+              <li><b>Two fingers</b> pan; <b>pinch</b> to zoom.</li>
+              <li>Rotate your phone — whatever was centred stays centred.</li>
+            </ul>
+          </section>
+          <section>
+            <h3>💰 Shared budgets</h3>
+            <ul>
+              <li>In Settings, set a traveller to <b>“shared with …”</b> to pool money (e.g. a couple).</li>
+              <li>Meals still split <b>per person</b>, but who owes whom is settled <b>per budget</b>.</li>
+            </ul>
+          </section>
+          <section>
+            <h3>📂 Drawers</h3>
+            <ul>
+              <li><b>Bills history</b>: the ☰ button, or swipe in from the <b>left edge</b>.</li>
+              <li><b>Settings</b>: the ⚙️ button, or swipe in from the <b>right edge</b>.</li>
+              <li>The phone's <b>Back</b> button closes an open drawer.</li>
+            </ul>
+          </section>
+          <p class="help-foot">
+            Everything here is also learnable by tapping around — nothing destructive happens without a
+            confirmation. Come back any time via ⚙️ Settings → ❓.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- In-page confirmation dialog (replaces native confirm() so the app never
+         drops out of full-screen). -->
+    <div id="confirm-modal" class="hidden">
+      <div class="confirm-backdrop"></div>
+      <div class="confirm-panel">
+        <p class="confirm-message"></p>
+        <div class="confirm-actions">
+          <button type="button" class="confirm-no">No</button>
+          <button type="button" class="confirm-yes">Yes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Operator-controlled debug flag, served by the hub from SIANO_CLIENT_DEBUG. -->
     <script src="/env.js"></script>
     <!-- App is plain ESM modules — no build step. -->
     <script type="module" src="/js/app.js"></script>
