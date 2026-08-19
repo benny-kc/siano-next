@@ -58,6 +58,8 @@ What a Cloudflare Tunnel gives you, and what it doesn't:
 | `SIANO_MAX_TRIPS` | `0` (∞) | Refuse creating new trip files past this many. **Set one if trip creation is unauthenticated.** |
 | `SIANO_HEARTBEAT_MS` | `30000` | Ping/reap interval. |
 | `SIANO_TRIP_ID_MAX` | `128` | Max trip-id length. |
+| `SIANO_DEBUG` | *(off)* | Verbose **hub** logging (per-request/per-op; op type + ids only, never payloads). Troubleshooting only. |
+| `SIANO_CLIENT_DEBUG` | *(off)* | Verbose **client** logging. The hub injects the flag via `/env.js`; there is no user-facing switch, so end users never see logs. Flip it and restart to enable, then reload the client. |
 
 Example production start:
 

@@ -3,7 +3,7 @@
 // Strategy: cache-first for our own GET assets, falling back to the network and
 // caching what it fetches. WebSocket sync traffic is untouched.
 
-const CACHE = "siano-shell-v2";
+const CACHE = "siano-shell-v3";
 const SHELL = [
   "/",
   "/index.html",
@@ -40,6 +40,7 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // don't touch cross-origin
+  if (url.pathname === "/env.js") return; // operator debug flag — always live, never cached
 
   // A trip deep-link (/t/<id>) always resolves to the app shell.
   if (url.pathname.startsWith("/t/")) {

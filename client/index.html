@@ -28,6 +28,10 @@
       <button id="add-meal" type="button">+ Bill</button>
     </nav>
 
+    <!-- Operator-controlled debug flag, served by the hub from SIANO_CLIENT_DEBUG.
+         Absent when the client is opened without the hub → debug stays off.
+         A classic (blocking) script, so it runs before the deferred module below. -->
+    <script src="/env.js"></script>
     <!-- App is plain ESM modules — no build step. -->
     <script type="module" src="/js/app.js"></script>
   </body>

@@ -99,6 +99,17 @@ function serveStatic(req, res) {
     res.writeHead(200, { "content-type": "text/plain" }).end("ok");
     return;
   }
+  // Operator-controlled client debug flag. Never cached, so flipping
+  // SIANO_CLIENT_DEBUG and restarting the hub takes effect on the next load.
+  if (url.pathname === "/env.js") {
+    const on = /^(1|true|yes|on)$/i.test(process.env.SIANO_CLIENT_DEBUG || "");
+    res.writeHead(200, {
+      "content-type": "text/javascript; charset=utf-8",
+      "cache-control": "no-store",
+    });
+    res.end(req.method === "HEAD" ? undefined : `window.__SIANO_DEBUG__=${on};`);
+    return;
+  }
 
   let rel = decodeURIComponent(url.pathname);
   if (rel === "/") rel = "/index.html";
