@@ -1,0 +1,11 @@
+{
+  "name": "siano-next-hub",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dumb, durable WebSocket relay for Siano trips. No dependencies — runs on Node 18+.",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js"
+  }
+}

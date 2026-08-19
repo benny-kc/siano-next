@@ -1,0 +1,15 @@
+# Hub runtime data (durable op logs + any cached photo blobs)
+/siano_data/
+siano_data/
+
+# Node
+node_modules/
+npm-debug.log*
+.npm/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

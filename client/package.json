@@ -1,0 +1,6 @@
+{
+  "name": "siano-next-client",
+  "private": true,
+  "type": "module",
+  "description": "Marks the buildless client as ESM so Node (tests) and the browser resolve the same .js modules the same way. There is no build step and no dependencies."
+}
