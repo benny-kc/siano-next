@@ -125,3 +125,56 @@ test("convergence: folding the same ops in any order yields identical state", ()
   const order2 = fold("trip", shuffled);
   assert.deepEqual(order2, order1, "state must be independent of fold order");
 });
+
+test("report: per-traveller paid / consumed / net matrix across all bills", () => {
+  const A = dev("A");
+  const log = [
+    ops.addMember(A, "m1", { name: "Ann", color: "#f00", initials: "AN" }),
+    ops.addMember(A, "m2", { name: "Bob", color: "#00f", initials: "BO" }),
+    ops.addMember(A, "m3", { name: "Cat", color: "#0f0", initials: "CA" }),
+    // Bill 1: Ann pays 3000, split Ann+Bob -> 1500 each.
+    ops.addMeal(A, "b1", { name: "Dinner" }),
+    ops.setAmount(A, "b1", 3000),
+    ops.setPayer(A, "b1", "m1"),
+    ops.addParticipant(A, "b1", "m1"),
+    ops.addParticipant(A, "b1", "m2"),
+    // Bill 2: Bob pays 900, split all three -> 300 each.
+    ops.addMeal(A, "b2", { name: "Taxi" }),
+    ops.setAmount(A, "b2", 900),
+    ops.setPayer(A, "b2", "m2"),
+    ops.addParticipant(A, "b2", "m1"),
+    ops.addParticipant(A, "b2", "m2"),
+    ops.addParticipant(A, "b2", "m3"),
+    // Bill 3: a draft (no payer) — must be excluded from the totals.
+    ops.addMeal(A, "b3", { name: "Snacks" }),
+    ops.setAmount(A, "b3", 500),
+    ops.addParticipant(A, "b3", "m1"),
+  ];
+  const rep = buildSnapshot(fold("trip", log)).report;
+
+  assert.equal(rep.draftCount, 1);
+  assert.equal(rep.grandTotalCents, 3900); // complete bills only (3000 + 900)
+  assert.equal(rep.consumedTotalCents, 3900); // even splits sum exactly
+
+  const totals = (id) => rep.memberTotals[id];
+  // Paid: Ann fronted 3000, Bob 900, Cat 0.
+  assert.equal(totals("m1").paidCents, 3000);
+  assert.equal(totals("m2").paidCents, 900);
+  assert.equal(totals("m3").paidCents, 0);
+  // Consumed: Ann 1500+300, Bob 1500+300, Cat 300.
+  assert.equal(totals("m1").shareCents, 1800);
+  assert.equal(totals("m2").shareCents, 1800);
+  assert.equal(totals("m3").shareCents, 300);
+  // Net = paid - consumed, and equals each member's balance.
+  assert.equal(totals("m1").netCents, 1200);
+  assert.equal(totals("m2").netCents, -900);
+  assert.equal(totals("m3").netCents, -300);
+
+  // The draft bill is listed but flagged incomplete.
+  const draft = rep.bills.find((b) => b.id === "b3");
+  assert.equal(draft.complete, false);
+  // A complete bill's per-participant shares are exposed for the matrix.
+  const dinner = rep.bills.find((b) => b.id === "b1");
+  assert.deepEqual(dinner.shares, { m1: 1500, m2: 1500 });
+  assert.equal(Object.prototype.hasOwnProperty.call(dinner.shares, "m3"), false);
+});

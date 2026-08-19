@@ -421,60 +421,158 @@ function disclaimerSection() {
 }
 
 // ── Report overlay ────────────────────────────────────────────────────────────
+// A read-only, spreadsheet-style view of the whole trip: every bill × each
+// traveller's share, then the per-traveller Paid / Consumed / Net summary — a
+// faithful port of the reference app's "Report & backup". "Consumed" is a
+// traveller's share of the bills; "Paid" is what they fronted; "Net" (= Paid −
+// Consumed) is their balance (green owed / red owes). A CSV button saves the
+// same data as a backup.
+function reportDash() {
+  return el("span", { class: "rep-dash" }, "·");
+}
+
 function renderReport(snap) {
   const root = document.getElementById("report-content");
-  const complete = snap.bills.filter((b) => b.complete);
-  const kids = [
-    el("p", { class: "report-intro" }, `${snap.billCount} bill${snap.billCount === 1 ? "" : "s"} · total tracked ${format(snap.totalCents)}`),
-  ];
+  const rep = snap.report;
+  const cols = rep.members;
 
-  if (complete.length === 0) {
-    kids.push(el("p", { class: "card-note" }, "No completed bills yet — a bill needs an amount, a payer and at least one traveller."));
-  } else {
-    const table = el("table", { class: "report" },
-      el("thead", {}, el("tr", {},
-        el("th", { class: "name" }, "Bill"),
-        el("th", {}, "Paid by"),
-        el("th", {}, "People"),
-        el("th", {}, "Amount"),
-      )),
-      el("tbody", {},
-        ...complete.map((b) => el("tr", {},
-          el("td", { class: "name" }, `${b.emoji || "🍽️"} ${b.name || "Untitled"}`),
-          el("td", {}, b.payerName || "—"),
-          el("td", {}, String(b.participantCount)),
-          el("td", {}, format(b.amountCents)),
-        ))),
-      el("tfoot", {}, el("tr", {},
-        el("td", { class: "name" }, "Total"),
-        el("td", {}, ""),
-        el("td", {}, ""),
-        el("td", {}, format(complete.reduce((s, b) => s + b.amountCents, 0))),
-      )),
-    );
-    kids.push(el("div", { class: "report-scroll" }, table));
+  if (rep.bills.length === 0 || cols.length === 0) {
+    root.replaceChildren(el("p", { class: "card-note" },
+      "Nothing to report yet — add some travellers and bills, then come back to check the totals and download a backup."));
+    return;
   }
 
-  // budget balances + settlements
-  kids.push(el("h3", { style: "margin-top:1.25rem" }, "Balances"));
-  kids.push(el("ul", { class: "plain-list" },
-    ...snap.budgets.map((b) =>
-      el("li", { class: "settle-item" },
-        el("span", { class: "from", style: "color:var(--slate-200)" }, b.name || "—"),
-        el("span", { class: "money " + toneClass(b.balanceCents) }, signed(b.balanceCents)),
-      )),
-  ));
-  if (snap.settlements.length) {
-    kids.push(el("h3", { style: "margin-top:1.25rem" }, "Settle up"));
+  const tot = (id, key) => rep.memberTotals[id]?.[key] || 0;
+  const netTotal = rep.grandTotalCents - rep.consumedTotalCents;
+
+  // Header: Bill · Payer · Total · <each traveller> · Diff
+  const head = el("tr", {},
+    el("th", { class: "name" }, "Bill"),
+    el("th", { class: "left" }, "Payer"),
+    el("th", {}, "Total"),
+    ...cols.map((m) => el("th", {}, el("span", { style: `color:${m.color || "var(--slate-300)"}` }, m.name))),
+    el("th", { class: "muted" }, "Diff"),
+  );
+
+  const body = rep.bills.map((b) =>
+    el("tr", { class: b.complete ? "" : "draft" },
+      el("th", { class: "name" }, `${b.emoji || "🍽️"} ${b.name || "Untitled"}`,
+        b.complete ? null : el("span", { class: "draft-tag" }, " · draft")),
+      el("td", { class: "left" }, b.payerName || "—"),
+      el("td", { class: "amt" }, format(b.amountCents)),
+      ...cols.map((m) =>
+        Object.prototype.hasOwnProperty.call(b.shares, m.id)
+          ? el("td", {}, format(b.shares[m.id]))
+          : el("td", {}, reportDash())),
+      el("td", { class: b.diffCents === 0 ? "muted" : "neg" }, b.diffCents === 0 ? "—" : format(b.diffCents)),
+    ));
+
+  const foot = el("tfoot", {},
+    el("tr", { class: "sum" },
+      el("th", { class: "name" }, "Consumed"),
+      el("td", {}, ""),
+      el("td", { class: "amt" }, format(rep.consumedTotalCents)),
+      ...cols.map((m) => el("td", {}, format(tot(m.id, "shareCents")))),
+      el("td", {}, ""),
+    ),
+    el("tr", { class: "sum" },
+      el("th", { class: "name" }, "Paid"),
+      el("td", {}, ""),
+      el("td", { class: "amt" }, format(rep.grandTotalCents)),
+      ...cols.map((m) => el("td", {}, format(tot(m.id, "paidCents")))),
+      el("td", {}, ""),
+    ),
+    el("tr", { class: "sum net" },
+      el("th", { class: "name" }, "Net"),
+      el("td", {}, ""),
+      el("td", { class: "amt " + toneClass(netTotal) }, signed(netTotal)),
+      ...cols.map((m) => el("td", { class: toneClass(tot(m.id, "netCents")) }, signed(tot(m.id, "netCents")))),
+      el("td", {}, ""),
+    ),
+  );
+
+  const table = el("table", { class: "report matrix" },
+    el("thead", {}, head), el("tbody", {}, ...body), foot);
+
+  const kids = [
+    el("div", { class: "report-actions" },
+      el("button", { type: "button", class: "csv-btn", onclick: () => downloadCsv(snap) }, "⬇ CSV backup")),
+    el("h3", {}, "Bills — each traveller's share"),
+    el("div", { class: "report-scroll" }, table),
+  ];
+  if (rep.draftCount > 0) {
+    kids.push(el("p", { class: "muted-note", style: "margin-top:0.5rem" },
+      `${rep.draftCount} draft ${rep.draftCount === 1 ? "bill is" : "bills are"} still incomplete (missing a total, payer or people) and don't count toward the totals.`));
+  }
+
+  if (snap.budgets.length) {
+    kids.push(el("h3", { style: "margin-top:1.5rem" }, "Balances — per budget"));
+    kids.push(el("ul", { class: "plain-list" },
+      ...snap.budgets.map((b) =>
+        el("li", { class: "settle-item" },
+          el("span", { class: "from", style: "color:var(--slate-200)" }, b.name || "—"),
+          el("span", { class: "money " + toneClass(b.balanceCents) },
+            b.balanceCents > 0 ? `is owed ${format(b.balanceCents)}` : b.balanceCents < 0 ? `owes ${format(-b.balanceCents)}` : "settled up"),
+        ))));
+  }
+
+  kids.push(el("h3", { style: "margin-top:1.5rem" }, "Suggested settlements"));
+  if (snap.settlements.length === 0) {
+    kids.push(el("p", { class: "card-note", style: "color:var(--emerald-400)" }, "🎉 Everyone is settled up."));
+  } else {
     kids.push(el("ul", { class: "plain-list" },
       ...snap.settlements.map((s) =>
         el("li", { class: "settle-item" },
-          el("span", { class: "from" }, s.from), el("span", { class: "arrow" }, "→"), el("span", { class: "to" }, s.to),
+          el("span", { class: "from" }, s.from), el("span", { class: "arrow" }, "pays"), el("span", { class: "to" }, s.to),
           el("span", { class: "money" }, format(s.amountCents)),
         ))));
   }
 
+  kids.push(el("p", { class: "muted-note", style: "margin-top:1rem;border-top:1px solid var(--slate-800);padding-top:0.75rem" },
+    "Read-only — nothing here changes the board. “Consumed” is a traveller's share of the bills; “Net” is what they fronted minus what they consumed (their balance)."));
+
   root.replaceChildren(...kids);
+}
+
+// Build a spreadsheet-friendly CSV of the report and hand it to the browser as a
+// download. Self-contained (a Blob + object URL) — no server round-trip, works
+// offline. The columns mirror the on-screen matrix.
+function csvCell(v) {
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadCsv(snap) {
+  const rep = snap.report;
+  const cols = rep.members;
+  const money2 = (c) => (c / 100).toFixed(2); // plain decimal, no locale grouping
+  const rows = [];
+  rows.push(["Bill", "Payer", "Total", ...cols.map((m) => m.name), "Diff"]);
+  for (const b of rep.bills) {
+    rows.push([
+      (b.emoji ? b.emoji + " " : "") + (b.name || "Untitled") + (b.complete ? "" : " (draft)"),
+      b.payerName || "",
+      money2(b.amountCents),
+      ...cols.map((m) => (Object.prototype.hasOwnProperty.call(b.shares, m.id) ? money2(b.shares[m.id]) : "")),
+      b.diffCents === 0 ? "" : money2(b.diffCents),
+    ]);
+  }
+  const tot = (id, key) => rep.memberTotals[id]?.[key] || 0;
+  rows.push(["Consumed", "", money2(rep.consumedTotalCents), ...cols.map((m) => money2(tot(m.id, "shareCents"))), ""]);
+  rows.push(["Paid", "", money2(rep.grandTotalCents), ...cols.map((m) => money2(tot(m.id, "paidCents"))), ""]);
+  rows.push(["Net", "", money2(rep.grandTotalCents - rep.consumedTotalCents), ...cols.map((m) => money2(tot(m.id, "netCents"))), ""]);
+
+  const csv = rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const safe = (snap.name || "siano-trip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "siano-trip";
+  a.href = url;
+  a.download = `${safe}-report.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ── Top bar + focus restore ────────────────────────────────────────────────────

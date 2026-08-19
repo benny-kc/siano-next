@@ -257,9 +257,11 @@ today — keep `core/*` and `ui/*` acyclic (the topo sort depends on it).
   drag-to-split, draggable meal cards, long-press-to-set-share, the slide-in
   Bills/Settings/Report drawers, help + in-page confirm, and the full game-like
   CSS now live under `client/js/ui/*` + `client/{index.html,css/app.css}`
-  (buildless, plain-CSS port of the reference's Tailwind look). What remains from
-  the reference UI: bill **photos/OCR** (next item), the QR share code, the
-  first-run coach-mark hints, and the CSV report export.
+  (buildless, plain-CSS port of the reference's Tailwind look). The Report drawer
+  shows the full bills × travellers share matrix with Paid/Consumed/Net totals
+  and a client-side CSV backup (`snapshot.report`, built in `snapshot.js`). What
+  remains from the reference UI: bill **photos/OCR** (next item), the QR share
+  code, and the first-run coach-mark hints.
 - **Photo/OCR blob channel**: log carries `photoId` + fields; bytes sync
   opportunistically; the OCR service stays server-side (`lib/siano/ocr.ex` in the
   reference).

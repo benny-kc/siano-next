@@ -108,6 +108,81 @@ function decorateMeal(meal, state) {
   };
 }
 
+/**
+ * Build the read-only Report: a bills × travellers share matrix plus the
+ * per-traveller Paid / Consumed / Net summary — the same view the reference
+ * app's `Siano.Trips.Report` produced. Covers EVERY bill (open and closed);
+ * incomplete "draft" bills are listed but excluded from the totals.
+ */
+function buildReport(state) {
+  const members = state.memberOrder.map((id) => {
+    const m = state.members[id];
+    return { id, name: m.name, color: m.color };
+  });
+
+  const shareTotals = {}; // memberId -> summed share across COMPLETE bills
+  const paidTotals = {}; // memberId -> summed total of bills they paid (complete)
+  for (const id of state.memberOrder) {
+    shareTotals[id] = 0;
+    paidTotals[id] = 0;
+  }
+
+  let consumedTotalCents = 0;
+  let grandTotalCents = 0;
+  let draftCount = 0;
+  const bills = [];
+
+  for (const mealId of state.mealOrder) {
+    const meal = state.meals[mealId];
+    if (!meal) continue;
+
+    // Defend against dangling ids exactly as decorateMeal does.
+    const participantIds = meal.participantIds.filter((id) =>
+      Object.prototype.hasOwnProperty.call(state.members, id));
+    const locks = {};
+    for (const [id, cents] of Object.entries(lockedShares(meal))) {
+      if (Object.prototype.hasOwnProperty.call(state.members, id)) locks[id] = cents;
+    }
+    const shares = customSplit(meal.amountCents, participantIds, locks);
+    const shareSum = Object.values(shares).reduce((a, b) => a + b, 0);
+    const complete = meal.amountCents > 0 && meal.payerId != null && participantIds.length > 0;
+
+    if (complete) {
+      grandTotalCents += meal.amountCents;
+      for (const [pid, cents] of Object.entries(shares)) {
+        shareTotals[pid] = (shareTotals[pid] || 0) + cents;
+        consumedTotalCents += cents;
+      }
+      if (paidTotals[meal.payerId] != null) paidTotals[meal.payerId] += meal.amountCents;
+    } else {
+      draftCount += 1;
+    }
+
+    bills.push({
+      id: meal.id,
+      name: meal.name,
+      emoji: meal.emoji,
+      amountCents: meal.amountCents,
+      payerId: meal.payerId ?? null,
+      payerName: meal.payerId ? state.members[meal.payerId]?.name : null,
+      complete,
+      shares, // { [memberId]: cents } — only participants appear
+      diffCents: meal.amountCents - shareSum,
+    });
+  }
+
+  const memberTotals = {};
+  for (const id of state.memberOrder) {
+    memberTotals[id] = {
+      paidCents: paidTotals[id],
+      shareCents: shareTotals[id],
+      netCents: paidTotals[id] - shareTotals[id], // = this member's balance
+    };
+  }
+
+  return { members, bills, memberTotals, consumedTotalCents, grandTotalCents, draftCount };
+}
+
 /** Build the full snapshot the board renders from a folded trip state. */
 export function buildSnapshot(state) {
   const members = state.memberOrder.map((id) => state.members[id]);
@@ -165,5 +240,6 @@ export function buildSnapshot(state) {
     memberCount: members.length,
     budgetCount: budgets.length,
     billCount: bills.length,
+    report: buildReport(state),
   };
 }
