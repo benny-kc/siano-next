@@ -86,36 +86,75 @@ function setSecurityHeaders(res) {
   res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=(self)");
 }
 
-// Caching policy for static responses.
+// Caching policy for static responses — env-controlled.
 //
 // The client is a buildless app: filenames are NOT content-hashed, so a deploy
 // reuses the same URLs (`/js/app.js`, `/css/app.css`, `/index.html`,
 // `/service-worker.js`). With no cache headers at all, a CDN in front — this hub
 // is meant to sit behind a Cloudflare Tunnel — edge-caches `.js`/`.css` by
 // extension and can pin the service worker, so a browser keeps being handed the
-// OLD bundle / OLD service worker and never sees a new release. That is exactly
-// the "old interface is still served" symptom.
+// OLD bundle / OLD service worker and never sees a new release. That is the
+// "old interface is still served" symptom.
 //
-// So every static response is `no-cache`: the browser (and Cloudflare, which
-// honours origin `Cache-Control` and will not serve `no-cache` from its edge
-// without revalidating) may STORE the file but must REVALIDATE it every time.
-// We pair it with a strong `ETag` (a hash of the bytes) and answer conditional
-// requests with 304, so revalidation is a tiny empty round-trip when nothing
-// changed but picks up a new build instantly when it does. `CDN-Cache-Control`
-// (the standard CDN-scoped directive, understood by Cloudflare and others)
-// mirrors it so an edge that separates the two still never serves a stale shell.
+// The headers are configurable so you can pick the policy per environment:
 //
-// The service worker is the most important one to keep fresh: if it is cached,
-// its own cache-first shell wins forever. `/env.js` stays `no-store` (below).
-function setCacheHeaders(res, etag) {
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("CDN-Cache-Control", "no-cache");
+//   • SIANO_CACHE_CONTROL      Cache-Control for static assets + the HTML shell.
+//                              Default "no-cache" (store but always revalidate —
+//                              ideal for development: a Cloudflare "Purge
+//                              Everything" always suffices and every deploy shows
+//                              up at once). For production set your caching
+//                              policy, e.g. "public, max-age=300" or
+//                              "public, max-age=31536000, immutable", to let
+//                              Cloudflare serve from its edge.
+//   • SIANO_CDN_CACHE_CONTROL  CDN-Cache-Control (the CDN-scoped directive
+//                              Cloudflare and others honour independently of the
+//                              browser's Cache-Control). Defaults to the same
+//                              value as SIANO_CACHE_CONTROL. Set it to cache at
+//                              the edge while telling browsers something else.
+//   • SIANO_SW_CACHE_CONTROL   Cache-Control (and CDN-Cache-Control) for
+//                              /service-worker.js ONLY. Default "no-cache", and
+//                              you almost never want anything else: a cached
+//                              service worker never updates, so its cache-first
+//                              shell would serve the old UI forever regardless of
+//                              how the other assets are cached. Its own knob so
+//                              you can cache everything else aggressively in
+//                              production while the SW stays fresh.
+//
+// An EMPTY value (e.g. `SIANO_CACHE_CONTROL=`) omits that header entirely, so
+// Cloudflare falls back to its own extension-based default caching.
+//
+// A strong `ETag` (a hash of the bytes) is always sent and conditional GETs are
+// answered with 304 in every mode, so `no-cache` revalidation is a tiny empty
+// round-trip and even a `max-age` asset revalidates cheaply once it goes stale.
+// `/env.js` is always `no-store` (it carries the live debug flag).
+function resolveCacheConfig(opts = {}) {
+  // undefined (unset) → the default; an explicit value (including "") wins.
+  const pick = (optVal, envKey, dflt) => {
+    if (optVal !== undefined) return optVal;
+    const e = process.env[envKey];
+    return e === undefined ? dflt : e;
+  };
+  const asset = pick(opts.cacheControl, "SIANO_CACHE_CONTROL", "no-cache");
+  const cdn = pick(opts.cdnCacheControl, "SIANO_CDN_CACHE_CONTROL", asset);
+  const sw = pick(opts.swCacheControl, "SIANO_SW_CACHE_CONTROL", "no-cache");
+  return { asset, cdn, sw };
+}
+
+// Apply the resolved policy. `isServiceWorker` picks the SW knob for both the
+// browser- and CDN-scoped headers. Empty strings omit the header.
+function setCacheHeaders(res, cfg, etag, isServiceWorker) {
+  const cc = isServiceWorker ? cfg.sw : cfg.asset;
+  const cdn = isServiceWorker ? cfg.sw : cfg.cdn;
+  if (cc) res.setHeader("Cache-Control", cc);
+  if (cdn) res.setHeader("CDN-Cache-Control", cdn);
   if (etag) res.setHeader("ETag", etag);
 }
 
 const etagOf = (data) => `"${createHash("sha1").update(data).digest("base64")}"`;
 
-function serveStatic(req, res) {
+// Build the static-file handler bound to a resolved cache config.
+function makeServeStatic(cacheCfg) {
+  return function serveStatic(req, res) {
   setSecurityHeaders(res);
 
   if (req.method !== "GET" && req.method !== "HEAD") {
@@ -160,9 +199,9 @@ function serveStatic(req, res) {
       return;
     }
     const etag = etagOf(data);
-    setCacheHeaders(res, etag);
+    setCacheHeaders(res, cacheCfg, etag, rel === "/service-worker.js");
     // Conditional GET: if the client already holds this exact version, don't
-    // resend the bytes — a tiny 304 keeps `no-cache` revalidation cheap.
+    // resend the bytes — a tiny 304 keeps revalidation cheap in every mode.
     if (req.headers["if-none-match"] === etag) {
       res.writeHead(304).end();
       return;
@@ -170,6 +209,7 @@ function serveStatic(req, res) {
     res.writeHead(200, { "content-type": MIME[path.extname(full)] || "application/octet-stream" });
     res.end(req.method === "HEAD" ? undefined : data);
   });
+  };
 }
 
 // ---- Validation & rate limiting --------------------------------------------
@@ -218,7 +258,8 @@ export function createHub(opts = {}) {
   const isValidTripId = tripIdValidator(tripIdMax);
   const allow = rateLimiter(maxMsgsPerSec);
 
-  const httpServer = http.createServer(serveStatic);
+  const cacheCfg = resolveCacheConfig(opts);
+  const httpServer = http.createServer(makeServeStatic(cacheCfg));
   // Slowloris / stuck-request guards (belt-and-braces behind Cloudflare).
   httpServer.headersTimeout = 15000;
   httpServer.requestTimeout = 30000;
@@ -351,7 +392,7 @@ export function createHub(opts = {}) {
     await logs.flush();
   }
 
-  return { httpServer, wss, logs, dataDir, shutdown };
+  return { httpServer, wss, logs, dataDir, cacheCfg, shutdown };
 }
 
 // Auto-start only when run directly (`node hub/server.js`), not when imported.
@@ -369,6 +410,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
       ` ops/trip=${num(process.env.SIANO_MAX_OPS_PER_TRIP, 0) || "∞"}` +
       ` trips=${num(process.env.SIANO_MAX_TRIPS, 0) || "∞"}`);
     log(`  origins    : ${process.env.SIANO_ALLOWED_ORIGINS || "(any — allowlist off)"}`);
+    const cc = hub.cacheCfg;
+    const show = (v) => (v === "" ? "(omitted)" : v);
+    log(`  static cache: assets="${show(cc.asset)}" cdn="${show(cc.cdn)}" sw="${show(cc.sw)}"` +
+      `${cc.asset === "no-cache" ? " (dev default — revalidate always)" : ""}`);
     log(`  debug logs : ${DEBUG ? "on" : "off (set SIANO_DEBUG=1 for per-request/op logs)"}`);
     if (HOST === "127.0.0.1" || HOST === "localhost") {
       // The bind default changed to loopback during hardening. If cloudflared

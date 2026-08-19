@@ -39,7 +39,7 @@ What a Cloudflare Tunnel gives you, and what it doesn't:
 | **Non-blocking writes** | Op persistence is async with a per-trip serialized write queue; a write flood can't block the event loop, and torn/failed writes are logged, not fatal. |
 | **Input validation** | Trip ids are validated (`^[A-Za-z0-9._~-]{1,SIANO_TRIP_ID_MAX}$`) before use as a filename; ops are shape-checked; malformed frames are dropped. |
 | **Static server** | GET/HEAD only (else `405`); path-traversal blocked (resolved path must stay under the client dir); a `/healthz` endpoint for probes. |
-| **Cache freshness** | The client is buildless (unhashed filenames), so every static response is `Cache-Control: no-cache` **+ `CDN-Cache-Control: no-cache`** with a strong `ETag`, and conditional GETs return `304`. Browser and CDN (Cloudflare honours these) may store but must revalidate, so a new release — critically the service worker — is picked up immediately instead of a stale shell being served forever. `/env.js` is `no-store`. |
+| **Cache freshness** | Static responses carry a configurable `Cache-Control` **+ `CDN-Cache-Control`** with a strong `ETag`; conditional GETs return `304`. The default (`no-cache`) makes browser and CDN (Cloudflare honours these) revalidate every load, so a new release is picked up at once — ideal during development. Set `SIANO_CACHE_CONTROL` to a caching policy for production. The **service worker** has its own knob (`SIANO_SW_CACHE_CONTROL`, default `no-cache`) and stays fresh regardless, because a cached SW never updates and its cache-first shell would serve the old UI forever. `/env.js` is always `no-store`. |
 | **Security headers** | A tight `Content-Security-Policy` (`default-src 'self'`, same-origin scripts, WebSocket only back to origin, no third-party anything), plus `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and a minimal `Permissions-Policy`. |
 | **Origin allowlist** | Optional `SIANO_ALLOWED_ORIGINS` (comma-separated). When set, WebSocket upgrades from any other `Origin` (or none, from a browser) are rejected `403` — defeats cross-site WebSocket hijacking if a trip URL ever leaks. |
 | **Graceful shutdown** | `SIGINT`/`SIGTERM` stop the heartbeat, close all sockets (`1001`), stop accepting, and flush pending writes. |
@@ -59,6 +59,9 @@ What a Cloudflare Tunnel gives you, and what it doesn't:
 | `SIANO_MAX_TRIPS` | `0` (∞) | Refuse creating new trip files past this many. **Set one if trip creation is unauthenticated.** |
 | `SIANO_HEARTBEAT_MS` | `30000` | Ping/reap interval. |
 | `SIANO_TRIP_ID_MAX` | `128` | Max trip-id length. |
+| `SIANO_CACHE_CONTROL` | `no-cache` | `Cache-Control` for static assets + the HTML shell. `no-cache` = store but always revalidate (dev-friendly; a Cloudflare purge always suffices). For production set a caching policy, e.g. `public, max-age=300` or `public, max-age=31536000, immutable`. Empty (`SIANO_CACHE_CONTROL=`) omits the header so Cloudflare uses its extension defaults. |
+| `SIANO_CDN_CACHE_CONTROL` | *(= `SIANO_CACHE_CONTROL`)* | `CDN-Cache-Control` — the CDN-scoped directive Cloudflare honours independently of the browser's `Cache-Control`. Defaults to the same value; set it to cache at the edge while telling browsers something else. Empty omits it. |
+| `SIANO_SW_CACHE_CONTROL` | `no-cache` | `Cache-Control` (and `CDN-Cache-Control`) for `/service-worker.js` only. Keep it `no-cache` — a cached service worker never updates, so its cache-first shell serves the old UI forever. Its own knob so you can cache everything else aggressively in production. |
 | `SIANO_DEBUG` | *(off)* | Verbose **hub** logging (per-request/per-op; op type + ids only, never payloads). Troubleshooting only. |
 | `SIANO_CLIENT_DEBUG` | *(off)* | Verbose **client** logging. The hub injects the flag via `/env.js`; there is no user-facing switch, so end users never see logs. Flip it and restart to enable, then reload the client. |
 
@@ -69,6 +72,16 @@ HOST=127.0.0.1 PORT=4000 \
 SIANO_ALLOWED_ORIGINS="https://siano.example.com" \
 SIANO_MAX_OPS_PER_TRIP=100000 \
 SIANO_MAX_TRIPS=5000 \
+node hub/server.js
+```
+
+During development keep the cache defaults (everything `no-cache`) so a Cloudflare
+purge always shows the latest build. Once the UI is stable, enable edge caching —
+the service worker stays fresh on its own knob:
+
+```bash
+# …plus the production vars above
+SIANO_CACHE_CONTROL="public, max-age=300" \
 node hub/server.js
 ```
 
@@ -109,16 +122,17 @@ The code can't do these for you:
 6. **Watch disk.** Even with per-trip caps, unauthenticated trip creation can
    grow the log directory; alert on disk usage and prefer `SIANO_MAX_TRIPS` +
    Cloudflare Access over hoping.
-7. **Purge the CDN once after a deploy that changed already-cached assets.** The
-   hub now sends `no-cache` + `ETag`, but any copy Cloudflare cached *before*
-   those headers existed (it edge-caches `.js`/`.css` by extension even with no
-   origin cache directives) keeps being served until its TTL lapses — which is
-   the classic "my old UI is still showing" symptom. Do a one-time **Purge
-   Everything** (Cloudflare → Caching → Configuration) after this change; from
-   then on the revalidation headers keep every release fresh. If you run a
-   "Cache Everything" page rule or a Browser-Cache-TTL override, exempt
-   `/service-worker.js` and `/index.html` (and ideally the whole app) so the
-   edge respects `no-cache`.
+7. **Purge the CDN when a cached asset changes.** With the default `no-cache`
+   policy Cloudflare revalidates every load, so a deploy shows up immediately —
+   but any copy Cloudflare cached *before* these headers existed (it edge-caches
+   `.js`/`.css` by extension even with no origin cache directives) keeps being
+   served until its TTL lapses — the classic "my old UI is still showing"
+   symptom. Do a one-time **Purge Everything** (Cloudflare → Caching →
+   Configuration) after switching to these headers. Once you turn on edge caching
+   in production (`SIANO_CACHE_CONTROL`), purge on each deploy (or use hashed
+   asset names). If you run a "Cache Everything" page rule or a Browser-Cache-TTL
+   override, exempt `/service-worker.js` and `/index.html` so the edge respects
+   their `no-cache`.
 
 ## Known limitations / roadmap
 

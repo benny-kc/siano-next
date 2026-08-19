@@ -180,7 +180,16 @@ Full detail in **docs/security.md**. Key points:
 `HOST`, `PORT`, `SIANO_DATA_DIR`, `SIANO_MAX_MSG_BYTES`, `SIANO_MAX_CONNECTIONS`,
 `SIANO_MAX_MSGS_PER_SEC`, `SIANO_ALLOWED_ORIGINS`, `SIANO_MAX_OPS_PER_TRIP`,
 `SIANO_MAX_TRIPS`, `SIANO_HEARTBEAT_MS`, `SIANO_TRIP_ID_MAX`, `SIANO_DEBUG`,
-`SIANO_CLIENT_DEBUG`. Defaults + meanings are tabled in docs/security.md.
+`SIANO_CLIENT_DEBUG`, `SIANO_CACHE_CONTROL`, `SIANO_CDN_CACHE_CONTROL`,
+`SIANO_SW_CACHE_CONTROL`. Defaults + meanings are tabled in docs/security.md.
+
+**Static cache headers are env-controlled** (`hub/server.js`,
+`resolveCacheConfig`). Default is `no-cache` everywhere (dev: revalidate always,
+a Cloudflare purge always shows the latest). For production set
+`SIANO_CACHE_CONTROL` to a caching policy (e.g. `public, max-age=300`); the
+service worker keeps its own `SIANO_SW_CACHE_CONTROL` (default `no-cache`) so a
+cached SW can never pin the old shell. Empty value ⇒ omit the header (Cloudflare
+extension defaults). A strong `ETag` + `304` is sent in every mode.
 
 ## Logging (troubleshooting)
 

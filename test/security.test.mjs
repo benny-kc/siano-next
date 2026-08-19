@@ -141,6 +141,31 @@ test("static responses are revalidated (no-cache + ETag), so a CDN never pins a 
   assert.equal(env.headers["cache-control"], "no-store");
 });
 
+test("static cache policy is configurable, but the service worker stays no-cache", async (t) => {
+  // Production-style: cache assets aggressively at the edge…
+  const { port } = await startHub(t, { cacheControl: "public, max-age=31536000, immutable" });
+  const head = (path) =>
+    new Promise((resolve) => http.get({ host: "127.0.0.1", port, path }, (r) => { r.resume(); resolve(r); }));
+
+  const asset = await head("/js/app.js");
+  assert.equal(asset.headers["cache-control"], "public, max-age=31536000, immutable");
+  assert.equal(asset.headers["cdn-cache-control"], "public, max-age=31536000, immutable");
+
+  // …but the service worker must NOT inherit that — a cached SW never updates,
+  // so its cache-first shell would serve the old UI forever.
+  const sw = await head("/service-worker.js");
+  assert.equal(sw.headers["cache-control"], "no-cache", "the service worker must stay no-cache");
+});
+
+test("an empty cache-control config omits the header (CDN falls back to its defaults)", async (t) => {
+  const { port } = await startHub(t, { cacheControl: "", cdnCacheControl: "" });
+  const res = await new Promise((resolve) =>
+    http.get({ host: "127.0.0.1", port, path: "/css/app.css" }, (r) => { r.resume(); resolve(r); }));
+  assert.equal(res.headers["cache-control"], undefined);
+  assert.equal(res.headers["cdn-cache-control"], undefined);
+  assert.ok(res.headers["etag"], "an ETag is still sent so conditional GETs work");
+});
+
 test("non-GET methods are rejected (405)", async (t) => {
   const { port } = await startHub(t);
   const status = await new Promise((resolve) => {
