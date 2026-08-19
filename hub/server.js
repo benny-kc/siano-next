@@ -9,7 +9,18 @@
 // balance and doesn't try to. Two hubs behind one shared log directory would be
 // active-active; a single one is plenty for a trip splitter.
 //
-// Env: PORT (default 4000), SIANO_DATA_DIR (default ../siano_data).
+// Hardening (it sits behind a Cloudflare Tunnel, but abusive traffic still
+// reaches it through the tunnel — see docs/security.md):
+//   - binds to 127.0.0.1 by default (only cloudflared should reach it);
+//   - bounded WebSocket messages + connection cap + heartbeat reaper (ws.js);
+//   - per-connection message rate limiting;
+//   - security headers + method + path-traversal checks on static responses;
+//   - async, non-blocking op persistence with per-trip disk caps (log.js);
+//   - graceful shutdown that flushes pending writes.
+//
+// Env (all optional): HOST, PORT, SIANO_DATA_DIR, SIANO_MAX_MSG_BYTES,
+//   SIANO_MAX_CONNECTIONS, SIANO_MAX_MSGS_PER_SEC, SIANO_ALLOWED_ORIGINS,
+//   SIANO_MAX_OPS_PER_TRIP, SIANO_MAX_TRIPS, SIANO_HEARTBEAT_MS, SIANO_TRIP_ID_MAX.
 
 import http from "node:http";
 import fs from "node:fs";
@@ -20,6 +31,8 @@ import { TripLogs, isValidOp } from "./log.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIR = path.resolve(__dirname, "../client");
+
+const num = (v, d) => (v == null || v === "" || Number.isNaN(Number(v)) ? d : Number(v));
 
 // ---- Static client ---------------------------------------------------------
 
@@ -34,16 +47,55 @@ const MIME = {
   ".ico": "image/x-icon",
 };
 
+// A tight CSP for a fully self-contained app: only same-origin scripts/styles,
+// WebSocket back to the same origin, and inline styles (the board sets element
+// style attributes). No third-party anything.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "connect-src 'self' ws: wss:",
+  "manifest-src 'self'",
+  "worker-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+function setSecurityHeaders(res) {
+  res.setHeader("Content-Security-Policy", CSP);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=(self)");
+}
+
 function serveStatic(req, res) {
+  setSecurityHeaders(res);
+
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res.writeHead(405, { "content-type": "text/plain", allow: "GET, HEAD" }).end("method not allowed");
+    return;
+  }
+
   const url = new URL(req.url, "http://localhost");
+  if (url.pathname === "/healthz") {
+    res.writeHead(200, { "content-type": "text/plain" }).end("ok");
+    return;
+  }
+
   let rel = decodeURIComponent(url.pathname);
   if (rel === "/") rel = "/index.html";
   // A trip deep-link (/t/<id>) is a client route — serve the app shell.
   if (rel.startsWith("/t/")) rel = "/index.html";
 
   const full = path.join(CLIENT_DIR, path.normalize(rel));
-  if (!full.startsWith(CLIENT_DIR)) {
-    res.writeHead(403).end("forbidden"); // path traversal
+  // Must resolve to a file strictly inside CLIENT_DIR (the trailing separator
+  // check stops a sibling like `<dir>-evil` from matching startsWith).
+  if (full !== CLIENT_DIR && !full.startsWith(CLIENT_DIR + path.sep)) {
+    res.writeHead(403, { "content-type": "text/plain" }).end("forbidden");
     return;
   }
   fs.readFile(full, (err, data) => {
@@ -52,25 +104,64 @@ function serveStatic(req, res) {
       return;
     }
     res.writeHead(200, { "content-type": MIME[path.extname(full)] || "application/octet-stream" });
-    res.end(data);
+    res.end(req.method === "HEAD" ? undefined : data);
   });
+}
+
+// ---- Validation & rate limiting --------------------------------------------
+
+function tripIdValidator(maxLen) {
+  const re = new RegExp(`^[A-Za-z0-9._~-]{1,${maxLen}}$`);
+  return (id) => typeof id === "string" && re.test(id);
+}
+
+// Fixed-window per-connection message rate limiter.
+function rateLimiter(maxPerSec) {
+  return (conn) => {
+    const now = Date.now();
+    if (!conn._rl || now >= conn._rl.reset) conn._rl = { count: 0, reset: now + 1000 };
+    conn._rl.count += 1;
+    return conn._rl.count <= maxPerSec;
+  };
 }
 
 // ---- Hub factory -----------------------------------------------------------
 
 /**
  * Build a hub. Returns the http.Server (call `.listen()` yourself) plus the
- * TripLogs, so tests can spin one up on an ephemeral port and inspect the log.
- * @param {{dataDir?: string}} [opts]
+ * TripLogs and a `shutdown()`, so tests and callers can manage lifecycle.
+ * @param {{dataDir?: string} & Record<string, any>} [opts]
  */
 export function createHub(opts = {}) {
   const dataDir = opts.dataDir || process.env.SIANO_DATA_DIR ||
     path.resolve(__dirname, "../siano_data");
-  const logs = new TripLogs(path.join(dataDir, "logs"));
+
+  const maxMessageBytes = opts.maxMessageBytes ?? num(process.env.SIANO_MAX_MSG_BYTES, 256 * 1024);
+  const maxConnections = opts.maxConnections ?? num(process.env.SIANO_MAX_CONNECTIONS, 500);
+  const maxMsgsPerSec = opts.maxMsgsPerSec ?? num(process.env.SIANO_MAX_MSGS_PER_SEC, 50);
+  const heartbeatMs = opts.heartbeatMs ?? num(process.env.SIANO_HEARTBEAT_MS, 30000);
+  const tripIdMax = opts.tripIdMax ?? num(process.env.SIANO_TRIP_ID_MAX, 128);
+  const originsEnv = opts.allowedOrigins ?? process.env.SIANO_ALLOWED_ORIGINS;
+  const allowedOrigins = originsEnv
+    ? new Set(String(originsEnv).split(",").map((s) => s.trim()).filter(Boolean))
+    : null;
+
+  const logs = new TripLogs(path.join(dataDir, "logs"), {
+    maxOpsPerTrip: opts.maxOpsPerTrip ?? num(process.env.SIANO_MAX_OPS_PER_TRIP, 0),
+    maxTrips: opts.maxTrips ?? num(process.env.SIANO_MAX_TRIPS, 0),
+  });
+
+  const isValidTripId = tripIdValidator(tripIdMax);
+  const allow = rateLimiter(maxMsgsPerSec);
 
   const httpServer = http.createServer(serveStatic);
-  const rooms = new Map(); // trip -> Set<Conn>
+  // Slowloris / stuck-request guards (belt-and-braces behind Cloudflare).
+  httpServer.headersTimeout = 15000;
+  httpServer.requestTimeout = 30000;
+  httpServer.keepAliveTimeout = 20000;
+  httpServer.maxConnections = maxConnections;
 
+  const rooms = new Map(); // trip -> Set<Conn>
   const join = (trip, conn) => {
     if (!rooms.has(trip)) rooms.set(trip, new Set());
     rooms.get(trip).add(conn);
@@ -88,17 +179,28 @@ export function createHub(opts = {}) {
     for (const c of room) if (c !== except) c.send(str);
   };
 
-  const wss = new WebSocketServer(httpServer);
+  const wss = new WebSocketServer(httpServer, { maxMessageBytes, maxConnections, allowedOrigins });
+
   wss.on("connection", (conn) => {
-    conn.on("message", (data) => {
+    conn.on("message", async (data) => {
+      if (!allow(conn)) {
+        conn.close(1008); // policy violation — too chatty
+        return;
+      }
+
       let msg;
       try {
         msg = JSON.parse(data);
       } catch {
         return;
       }
+      if (!msg || typeof msg !== "object") return;
 
-      if (msg.t === "hello" && typeof msg.trip === "string") {
+      if (msg.t === "hello") {
+        if (!isValidTripId(msg.trip)) {
+          conn.close(1008);
+          return;
+        }
         conn.trip = msg.trip;
         join(msg.trip, conn);
         // Hand the newcomer everything it's missing (delta on reconnect).
@@ -109,9 +211,12 @@ export function createHub(opts = {}) {
       if (!conn.trip) return; // must say hello first
 
       if (msg.t === "op" && isValidOp(msg.op)) {
-        if (logs.append(conn.trip, msg.op)) fanout(conn.trip, { t: "op", op: msg.op }, conn);
+        if (await logs.append(conn.trip, msg.op)) fanout(conn.trip, { t: "op", op: msg.op }, conn);
       } else if (msg.t === "ops" && Array.isArray(msg.ops)) {
-        const added = msg.ops.filter((op) => logs.append(conn.trip, op));
+        const added = [];
+        for (const op of msg.ops) {
+          if (isValidOp(op) && (await logs.append(conn.trip, op))) added.push(op);
+        }
         if (added.length) fanout(conn.trip, { t: "ops", ops: added }, conn);
       }
     });
@@ -119,16 +224,50 @@ export function createHub(opts = {}) {
     conn.on("close", () => leave(conn));
   });
 
-  return { httpServer, logs, dataDir };
+  // Heartbeat: ping every connection each interval; reap any that missed the
+  // previous pong (dead or wedged peers otherwise leak sockets/memory forever).
+  const heartbeat = setInterval(() => {
+    for (const conn of wss.connections) {
+      if (conn.isAlive === false) {
+        conn.terminate();
+        continue;
+      }
+      conn.isAlive = false;
+      conn.ping();
+    }
+  }, heartbeatMs);
+  heartbeat.unref?.();
+
+  let shuttingDown = false;
+  async function shutdown() {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    clearInterval(heartbeat);
+    wss.closeAll(1001);
+    await new Promise((resolve) => httpServer.close(resolve));
+    await logs.flush();
+  }
+
+  return { httpServer, wss, logs, dataDir, shutdown };
 }
 
 // Auto-start only when run directly (`node hub/server.js`), not when imported.
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
-  const PORT = Number(process.env.PORT || 4000);
-  const { httpServer, dataDir } = createHub();
-  httpServer.listen(PORT, () => {
-    console.log(`siano hub listening on http://localhost:${PORT}`);
+  const HOST = process.env.HOST || "127.0.0.1";
+  const PORT = num(process.env.PORT, 4000);
+  const hub = createHub();
+  hub.httpServer.listen(PORT, HOST, () => {
+    console.log(`siano hub listening on http://${HOST}:${PORT}`);
     console.log(`  serving client from ${CLIENT_DIR}`);
-    console.log(`  op logs under        ${path.join(dataDir, "logs")}`);
+    console.log(`  op logs under        ${path.join(hub.dataDir, "logs")}`);
+    if (HOST !== "127.0.0.1" && HOST !== "localhost") {
+      console.warn("  ⚠ bound to a non-loopback address — expose via a tunnel/proxy, not directly.");
+    }
   });
+  for (const sig of ["SIGINT", "SIGTERM"]) {
+    process.on(sig, () => {
+      console.log(`\n${sig} received — shutting down…`);
+      hub.shutdown().then(() => process.exit(0));
+    });
+  }
 }

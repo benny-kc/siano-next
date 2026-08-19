@@ -53,7 +53,8 @@ node hub/server.js
 
 Open <http://localhost:4000>. A fresh visit mints a trip at `/t/<id>`; open that
 same URL on another device/tab (pointed at the same hub) and edits sync live.
-Configure with `PORT` and `SIANO_DATA_DIR` (default `./siano_data`).
+The hub binds `127.0.0.1` by default (put a tunnel/proxy in front — see below);
+configure with `HOST`, `PORT`, and `SIANO_DATA_DIR` (default `./siano_data`).
 
 The app also runs with **no hub at all** — open `client/index.html` and it works
 offline against IndexedDB; it just won't sync until it can reach a hub.
@@ -68,7 +69,19 @@ The reducer suite includes the key guarantees: locked shares are never clamped,
 balances stay exact, OR-Set is add-wins, concurrent money edits surface a
 conflict (and a sequential edit does not), and folding in any order yields
 identical state. The hub suite exercises the real WebSocket framing, fan-out,
-and delta-on-reconnect.
+and delta-on-reconnect. The security suite covers the hub's abuse guards
+(oversized-message rejection, Origin allowlist, trip-id validation, rate limit,
+disk caps, security headers).
+
+## Security
+
+The hub is meant to sit behind a tunnel or reverse proxy (e.g. Cloudflare
+Tunnel). It binds loopback by default and ships with WebSocket size/rate limits,
+a connection cap, a heartbeat reaper, disk caps, input validation, security
+headers, and an optional Origin allowlist — all env-configurable. There is **no
+built-in auth**: the trip URL is the capability. For private trips, put
+Cloudflare Access (or equivalent) in front. Full threat model, tuning knobs, and
+a hardened systemd unit are in **[docs/security.md](docs/security.md)**.
 
 ## Roadmap
 

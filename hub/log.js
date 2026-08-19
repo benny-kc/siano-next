@@ -6,10 +6,18 @@
 // the file is append-only, it is crash-safe by construction and any leaf can
 // re-seed it, exactly as the architecture calls for.
 //
+// Abuse containment (there is no auth — the trip URL is the capability, so
+// anyone who reaches the hub can write): writes are async so a flood can't block
+// the event loop, and two caps bound worst-case disk/inode use —
+//   - maxOpsPerTrip: refuse further ops once a trip is this large, and
+//   - maxTrips:      refuse to create new trip files past this many.
+// Both default off (0 = unlimited) but SHOULD be set in production; see docs.
+//
 // opId() is imported from the CLIENT core so the hub and every device agree on
 // op identity from a single source of truth.
 
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import { opId } from "../client/js/core/lamport.js";
 
@@ -20,15 +28,23 @@ export function isValidOp(op) {
     typeof op === "object" &&
     typeof op.op === "string" &&
     typeof op.lamport === "number" &&
+    Number.isFinite(op.lamport) &&
     typeof op.device === "string"
   );
 }
 
 export class TripLogs {
-  constructor(dir) {
+  /** @param {string} dir @param {{maxOpsPerTrip?: number, maxTrips?: number}} [opts] */
+  constructor(dir, opts = {}) {
     this.dir = dir;
+    this.maxOpsPerTrip = opts.maxOpsPerTrip ?? 0; // 0 = unlimited
+    this.maxTrips = opts.maxTrips ?? 0; // 0 = unlimited
     fs.mkdirSync(dir, { recursive: true });
     this.mem = new Map(); // trip -> Map(opId -> op)
+    this.writeQueues = new Map(); // trip -> Promise chain (serialize appends)
+    this.capped = new Set(); // trips we've already warned about
+    // Count existing trip files so maxTrips survives restarts.
+    this.tripCount = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).length;
   }
 
   _file(trip) {
@@ -55,15 +71,54 @@ export class TripLogs {
     return map;
   }
 
-  /** Append one op; returns true if it was new (and thus should be fanned out). */
-  append(trip, op) {
+  _warnCap(trip, why) {
+    if (this.capped.has(trip)) return;
+    this.capped.add(trip);
+    console.warn(`siano: refusing ops for trip ${trip}: ${why}`);
+  }
+
+  /**
+   * Append one op. Returns a promise resolving to true if it was new (and thus
+   * should be fanned out), false if it was a duplicate or refused by a cap.
+   */
+  async append(trip, op) {
     if (!isValidOp(op)) return false;
+    const fileExists = this.mem.has(trip) || fs.existsSync(this._file(trip));
+    // Refuse to create a brand-new trip file past the global cap.
+    if (!fileExists && this.maxTrips && this.tripCount >= this.maxTrips) {
+      this._warnCap(trip, `server at trip cap (${this.maxTrips})`);
+      return false;
+    }
     const map = this._load(trip);
     const id = opId(op);
     if (map.has(id)) return false;
+    if (this.maxOpsPerTrip && map.size >= this.maxOpsPerTrip) {
+      this._warnCap(trip, `trip at op cap (${this.maxOpsPerTrip})`);
+      return false;
+    }
+    if (!fileExists) this.tripCount += 1;
     map.set(id, op);
-    fs.appendFileSync(this._file(trip), JSON.stringify(op) + "\n");
+    // The op is already in the in-memory index (and about to be fanned out); a
+    // failed disk write must not reject into the caller's async handler. Log it
+    // and move on — a leaf will re-send on reconnect if it's ever lost.
+    await this._enqueueWrite(trip, JSON.stringify(op) + "\n").catch((e) =>
+      console.error(`siano: append write failed for trip ${trip}:`, e));
     return true;
+  }
+
+  // Serialize appends per trip so concurrent writes never interleave a line.
+  _enqueueWrite(trip, line) {
+    const prev = this.writeQueues.get(trip) || Promise.resolve();
+    const next = prev
+      .catch(() => {})
+      .then(() => fsp.appendFile(this._file(trip), line));
+    this.writeQueues.set(trip, next);
+    return next;
+  }
+
+  /** Flush all pending writes (call before shutdown). */
+  async flush() {
+    await Promise.allSettled([...this.writeQueues.values()]);
   }
 
   /** Every op for a trip. */
@@ -73,7 +128,7 @@ export class TripLogs {
 
   /** The ops this trip has that the caller (who lists `have` op-ids) is missing. */
   missing(trip, have) {
-    const set = new Set(have || []);
+    const set = new Set(Array.isArray(have) ? have : []);
     return this.all(trip).filter((op) => !set.has(opId(op)));
   }
 }

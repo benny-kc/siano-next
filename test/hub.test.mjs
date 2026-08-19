@@ -38,10 +38,11 @@ function next(ws, predicate) {
 
 test("hub relays ops between devices and delta-syncs a late joiner", async (t) => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "siano-hub-"));
-  const { httpServer } = createHub({ dataDir });
+  const hub = createHub({ dataDir });
+  const { httpServer } = hub;
   const port = await listen(httpServer);
-  t.after(() => {
-    httpServer.close();
+  t.after(async () => {
+    await hub.shutdown();
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
