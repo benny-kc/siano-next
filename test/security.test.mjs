@@ -166,6 +166,33 @@ test("an empty cache-control config omits the header (CDN falls back to its defa
   assert.ok(res.headers["etag"], "an ETag is still sent so conditional GETs work");
 });
 
+test("asset hashing serves fingerprinted, immutable URLs and rewrites the import graph", async (t) => {
+  const { port } = await startHub(t, { assetHashing: true });
+  const get = (path) =>
+    new Promise((resolve) => http.get({ host: "127.0.0.1", port, path }, (r) => {
+      let body = ""; r.setEncoding("utf8"); r.on("data", (c) => (body += c));
+      r.on("end", () => resolve({ res: r, body }));
+    }));
+
+  // The shell is served no-cache and points at hashed asset URLs (not the plain
+  // /js/app.js), so a returning browser always resolves the current bundle.
+  const home = await get("/");
+  assert.equal(home.res.headers["cache-control"], "no-cache");
+  const m = home.body.match(/\/js\/app\.[0-9a-f]{6,}\.js/);
+  assert.ok(m, "index.html must reference a content-hashed app.js");
+  assert.doesNotMatch(home.body, /["']\/js\/app\.js["']/, "no un-hashed app.js reference remains");
+
+  // The hashed module is immutable (cache forever, never purge) and its own
+  // relative imports were rewritten to hashed names — so the whole graph loads.
+  const app = await get(m[0]);
+  assert.equal(app.res.headers["cache-control"], "public, max-age=31536000, immutable");
+  assert.match(app.body, /from ["']\.\/ui\/board\.[0-9a-f]{6,}\.js["']/, "imports must be rewritten to hashed URLs");
+
+  // A trip deep-link also serves the shell.
+  const trip = await get("/t/abc123");
+  assert.match(trip.body, /\/js\/app\.[0-9a-f]{6,}\.js/);
+});
+
 test("non-GET methods are rejected (405)", async (t) => {
   const { port } = await startHub(t);
   const status = await new Promise((resolve) => {

@@ -139,7 +139,8 @@ Create ops via the `ops.js` constructors (they stamp the clock). Emit them throu
 |---|---|
 | `hub/ws.js` | RFC 6455 WebSocket server: handshake + framing, bounded frames, masking/reserved/control-frame checks, `ping()`/`terminate()`, `"reject"` events. |
 | `hub/log.js` | `TripLogs`: durable append-only JSONL per trip; async per-trip write queue; op/trip caps; `all`/`missing`/`flush`. |
-| `hub/server.js` | `createHub({...})` factory (returns `{ httpServer, wss, logs, shutdown }`) + static server + relay + heartbeat + logging + graceful shutdown. Auto-starts when run directly. |
+| `hub/server.js` | `createHub({...})` factory (returns `{ httpServer, wss, logs, shutdown }`) + static server (env-controlled cache headers + optional asset hashing) + relay + heartbeat + logging + graceful shutdown. Auto-starts when run directly. |
+| `hub/assets.js` | `buildAssets(clientDir)` — in-memory content-hash fingerprinting: rewrites the ESM import graph + `index.html` + service worker to `…<hash>.js` URLs (dependency-ordered; throws on an import cycle). Enabled by `SIANO_ASSET_HASHING`. |
 
 **Tests (`test/*.mjs`, `node --test`):** `split`, `money`, `budgets`, `reducer`
 (merge rules + order-independent convergence), `hub` (real WS framing, fan-out,
@@ -180,16 +181,25 @@ Full detail in **docs/security.md**. Key points:
 `HOST`, `PORT`, `SIANO_DATA_DIR`, `SIANO_MAX_MSG_BYTES`, `SIANO_MAX_CONNECTIONS`,
 `SIANO_MAX_MSGS_PER_SEC`, `SIANO_ALLOWED_ORIGINS`, `SIANO_MAX_OPS_PER_TRIP`,
 `SIANO_MAX_TRIPS`, `SIANO_HEARTBEAT_MS`, `SIANO_TRIP_ID_MAX`, `SIANO_DEBUG`,
-`SIANO_CLIENT_DEBUG`, `SIANO_CACHE_CONTROL`, `SIANO_CDN_CACHE_CONTROL`,
-`SIANO_SW_CACHE_CONTROL`. Defaults + meanings are tabled in docs/security.md.
+`SIANO_CLIENT_DEBUG`, `SIANO_ASSET_HASHING`, `SIANO_CACHE_CONTROL`,
+`SIANO_CDN_CACHE_CONTROL`, `SIANO_SW_CACHE_CONTROL`. Defaults + meanings are
+tabled in docs/security.md.
 
 **Static cache headers are env-controlled** (`hub/server.js`,
 `resolveCacheConfig`). Default is `no-cache` everywhere (dev: revalidate always,
-a Cloudflare purge always shows the latest). For production set
-`SIANO_CACHE_CONTROL` to a caching policy (e.g. `public, max-age=300`); the
-service worker keeps its own `SIANO_SW_CACHE_CONTROL` (default `no-cache`) so a
-cached SW can never pin the old shell. Empty value ⇒ omit the header (Cloudflare
-extension defaults). A strong `ETag` + `304` is sent in every mode.
+a Cloudflare purge always shows the latest). The service worker keeps its own
+`SIANO_SW_CACHE_CONTROL` (default `no-cache`) so a cached SW can never pin the
+old shell. Empty value ⇒ omit the header (Cloudflare extension defaults). A
+strong `ETag` + `304` is sent in every mode.
+
+**Content-hashed assets** (`hub/assets.js`, `SIANO_ASSET_HASHING=1`): at startup
+the hub fingerprints the client — hashing JS in dependency order and rewriting
+the ESM import graph + `index.html` + the service worker to `…<hash>.js` URLs —
+all in memory, so source files stay unhashed and it's still buildless. Hashed
+URLs are served `immutable`, so production needs **no CDN purge** on deploy; only
+the tiny `no-cache` shell + SW revalidate. If the import graph ever gains a cycle
+the build throws and the hub falls back to serving unhashed files. No cycles
+today — keep `core/*` and `ui/*` acyclic (the topo sort depends on it).
 
 ## Logging (troubleshooting)
 

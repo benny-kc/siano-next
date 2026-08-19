@@ -29,6 +29,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WebSocketServer } from "./ws.js";
 import { TripLogs, isValidOp } from "./log.js";
+import { buildAssets } from "./assets.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIR = path.resolve(__dirname, "../client");
@@ -127,88 +128,129 @@ function setSecurityHeaders(res) {
 // answered with 304 in every mode, so `no-cache` revalidation is a tiny empty
 // round-trip and even a `max-age` asset revalidates cheaply once it goes stale.
 // `/env.js` is always `no-store` (it carries the live debug flag).
-function resolveCacheConfig(opts = {}) {
+// `SIANO_ASSET_HASHING=1` turns on content-hashed asset URLs (see assets.js):
+// the JS/CSS/manifest are served at fingerprinted URLs that change when their
+// bytes do, so they can be cached FOREVER and a new release is picked up with no
+// purge. That flips the sensible defaults below — fingerprinted assets default
+// to `immutable`, while a stable-URL asset (hashing off) defaults to `no-cache`.
+// The HTML shell and the service worker stay the small `no-cache` bootstrap
+// layer either way. Any explicit env value still overrides the default.
+function resolveCacheConfig(opts = {}, hashing = false) {
   // undefined (unset) → the default; an explicit value (including "") wins.
   const pick = (optVal, envKey, dflt) => {
     if (optVal !== undefined) return optVal;
     const e = process.env[envKey];
     return e === undefined ? dflt : e;
   };
-  const asset = pick(opts.cacheControl, "SIANO_CACHE_CONTROL", "no-cache");
+  const assetDefault = hashing ? "public, max-age=31536000, immutable" : "no-cache";
+  const asset = pick(opts.cacheControl, "SIANO_CACHE_CONTROL", assetDefault);
   const cdn = pick(opts.cdnCacheControl, "SIANO_CDN_CACHE_CONTROL", asset);
   const sw = pick(opts.swCacheControl, "SIANO_SW_CACHE_CONTROL", "no-cache");
-  return { asset, cdn, sw };
+  // The HTML shell must revalidate when hashing is on (it names the current
+  // hashed asset URLs); without hashing it follows the asset policy, as before.
+  const entry = hashing ? "no-cache" : asset;
+  const entryCdn = hashing ? "no-cache" : cdn;
+  // Unhashed originals still reachable via the disk fallback while hashing is on
+  // have stable URLs, so they must never be cached; without hashing they simply
+  // are the assets.
+  const disk = hashing ? "no-cache" : asset;
+  const diskCdn = hashing ? "no-cache" : cdn;
+  return {
+    hashing,
+    raw: { asset, cdn, sw },
+    policy: {
+      asset: { cc: asset, cdn },
+      sw: { cc: sw, cdn: sw },
+      entry: { cc: entry, cdn: entryCdn },
+      disk: { cc: disk, cdn: diskCdn },
+    },
+  };
 }
 
-// Apply the resolved policy. `isServiceWorker` picks the SW knob for both the
-// browser- and CDN-scoped headers. Empty strings omit the header.
-function setCacheHeaders(res, cfg, etag, isServiceWorker) {
-  const cc = isServiceWorker ? cfg.sw : cfg.asset;
-  const cdn = isServiceWorker ? cfg.sw : cfg.cdn;
-  if (cc) res.setHeader("Cache-Control", cc);
-  if (cdn) res.setHeader("CDN-Cache-Control", cdn);
+// Apply the resolved policy for a tag ("asset" | "sw" | "entry" | "disk").
+// Empty strings omit the header (CDN falls back to its own defaults).
+function setCacheHeaders(res, cfg, tag, etag) {
+  const p = cfg.policy[tag] || cfg.policy.disk;
+  if (p.cc) res.setHeader("Cache-Control", p.cc);
+  if (p.cdn) res.setHeader("CDN-Cache-Control", p.cdn);
   if (etag) res.setHeader("ETag", etag);
 }
 
 const etagOf = (data) => `"${createHash("sha1").update(data).digest("base64")}"`;
 
-// Build the static-file handler bound to a resolved cache config.
-function makeServeStatic(cacheCfg) {
+// Serve one buffer with the right cache tag + conditional-GET (304) support.
+function sendBuffer(req, res, cfg, tag, servedPath, buf) {
+  const etag = etagOf(buf);
+  setCacheHeaders(res, cfg, tag, etag);
+  if (req.headers["if-none-match"] === etag) { res.writeHead(304).end(); return; }
+  res.writeHead(200, { "content-type": MIME[path.extname(servedPath)] || "application/octet-stream" });
+  res.end(req.method === "HEAD" ? undefined : buf);
+}
+
+// Build the static-file handler bound to a resolved cache config and, when asset
+// hashing is enabled, the in-memory fingerprinted assets (else `null`).
+function makeServeStatic(cfg, assets) {
   return function serveStatic(req, res) {
-  setSecurityHeaders(res);
+    setSecurityHeaders(res);
 
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    res.writeHead(405, { "content-type": "text/plain", allow: "GET, HEAD" }).end("method not allowed");
-    return;
-  }
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      res.writeHead(405, { "content-type": "text/plain", allow: "GET, HEAD" }).end("method not allowed");
+      return;
+    }
 
-  const url = new URL(req.url, "http://localhost");
-  debug(`http ${req.method} ${url.pathname} from ${clientIp(req)}`);
-  if (url.pathname === "/healthz") {
-    res.writeHead(200, { "content-type": "text/plain" }).end("ok");
-    return;
-  }
-  // Operator-controlled client debug flag. Never cached, so flipping
-  // SIANO_CLIENT_DEBUG and restarting the hub takes effect on the next load.
-  if (url.pathname === "/env.js") {
-    const on = /^(1|true|yes|on)$/i.test(process.env.SIANO_CLIENT_DEBUG || "");
-    res.writeHead(200, {
-      "content-type": "text/javascript; charset=utf-8",
-      "cache-control": "no-store",
-      "cdn-cache-control": "no-store",
+    const url = new URL(req.url, "http://localhost");
+    debug(`http ${req.method} ${url.pathname} from ${clientIp(req)}`);
+    if (url.pathname === "/healthz") {
+      res.writeHead(200, { "content-type": "text/plain" }).end("ok");
+      return;
+    }
+    // Operator-controlled client debug flag. Never cached, so flipping
+    // SIANO_CLIENT_DEBUG and restarting the hub takes effect on the next load.
+    if (url.pathname === "/env.js") {
+      const on = /^(1|true|yes|on)$/i.test(process.env.SIANO_CLIENT_DEBUG || "");
+      res.writeHead(200, {
+        "content-type": "text/javascript; charset=utf-8",
+        "cache-control": "no-store",
+        "cdn-cache-control": "no-store",
+      });
+      res.end(req.method === "HEAD" ? undefined : `window.__SIANO_DEBUG__=${on};`);
+      return;
+    }
+
+    let rel = decodeURIComponent(url.pathname);
+    if (rel === "/") rel = "/index.html";
+    // A trip deep-link (/t/<id>) is a client route — serve the app shell.
+    if (rel.startsWith("/t/")) rel = "/index.html";
+
+    // Fingerprinted serving (in memory): the rewritten shell + service worker
+    // (stable URLs, no-cache) and the content-hashed assets (immutable). Anything
+    // else drops through to the disk server below.
+    if (assets) {
+      if (rel === "/index.html") return sendBuffer(req, res, cfg, "entry", rel, assets.entry);
+      if (rel === "/service-worker.js" && assets.sw) return sendBuffer(req, res, cfg, "sw", rel, assets.sw);
+      const hashed = assets.hashedContent.get(rel);
+      if (hashed) return sendBuffer(req, res, cfg, "asset", rel, hashed);
+    }
+
+    const full = path.join(CLIENT_DIR, path.normalize(rel));
+    // Must resolve to a file strictly inside CLIENT_DIR (the trailing separator
+    // check stops a sibling like `<dir>-evil` from matching startsWith).
+    if (full !== CLIENT_DIR && !full.startsWith(CLIENT_DIR + path.sep)) {
+      res.writeHead(403, { "content-type": "text/plain" }).end("forbidden");
+      return;
+    }
+    fs.readFile(full, (err, data) => {
+      if (err) {
+        res.writeHead(404, { "content-type": "text/plain" }).end("not found");
+        return;
+      }
+      // index.html / SW keep their own policy; other disk hits are the assets
+      // (hashing off) or unhashed originals nothing references (hashing on).
+      const tag = rel === "/service-worker.js" ? "sw"
+        : rel === "/index.html" ? "entry"
+        : assets ? "disk" : "asset";
+      sendBuffer(req, res, cfg, tag, full, data);
     });
-    res.end(req.method === "HEAD" ? undefined : `window.__SIANO_DEBUG__=${on};`);
-    return;
-  }
-
-  let rel = decodeURIComponent(url.pathname);
-  if (rel === "/") rel = "/index.html";
-  // A trip deep-link (/t/<id>) is a client route — serve the app shell.
-  if (rel.startsWith("/t/")) rel = "/index.html";
-
-  const full = path.join(CLIENT_DIR, path.normalize(rel));
-  // Must resolve to a file strictly inside CLIENT_DIR (the trailing separator
-  // check stops a sibling like `<dir>-evil` from matching startsWith).
-  if (full !== CLIENT_DIR && !full.startsWith(CLIENT_DIR + path.sep)) {
-    res.writeHead(403, { "content-type": "text/plain" }).end("forbidden");
-    return;
-  }
-  fs.readFile(full, (err, data) => {
-    if (err) {
-      res.writeHead(404, { "content-type": "text/plain" }).end("not found");
-      return;
-    }
-    const etag = etagOf(data);
-    setCacheHeaders(res, cacheCfg, etag, rel === "/service-worker.js");
-    // Conditional GET: if the client already holds this exact version, don't
-    // resend the bytes — a tiny 304 keeps revalidation cheap in every mode.
-    if (req.headers["if-none-match"] === etag) {
-      res.writeHead(304).end();
-      return;
-    }
-    res.writeHead(200, { "content-type": MIME[path.extname(full)] || "application/octet-stream" });
-    res.end(req.method === "HEAD" ? undefined : data);
-  });
   };
 }
 
@@ -258,8 +300,23 @@ export function createHub(opts = {}) {
   const isValidTripId = tripIdValidator(tripIdMax);
   const allow = rateLimiter(maxMsgsPerSec);
 
-  const cacheCfg = resolveCacheConfig(opts);
-  const httpServer = http.createServer(makeServeStatic(cacheCfg));
+  // Optional content-hashed asset URLs (see assets.js). Built once at startup;
+  // if the client can't be fingerprinted (e.g. an import cycle), fall back to
+  // serving unhashed files rather than failing to start.
+  const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v));
+  const wantHashing = opts.assetHashing !== undefined
+    ? !!opts.assetHashing
+    : (process.env.SIANO_ASSET_HASHING !== undefined && truthy(process.env.SIANO_ASSET_HASHING));
+  let assets = null;
+  if (wantHashing) {
+    try {
+      assets = buildAssets(CLIENT_DIR);
+    } catch (e) {
+      warn(`asset hashing disabled — serving unhashed files: ${e.message}`);
+    }
+  }
+  const cacheCfg = resolveCacheConfig(opts, !!assets);
+  const httpServer = http.createServer(makeServeStatic(cacheCfg, assets));
   // Slowloris / stuck-request guards (belt-and-braces behind Cloudflare).
   httpServer.headersTimeout = 15000;
   httpServer.requestTimeout = 30000;
@@ -392,7 +449,7 @@ export function createHub(opts = {}) {
     await logs.flush();
   }
 
-  return { httpServer, wss, logs, dataDir, cacheCfg, shutdown };
+  return { httpServer, wss, logs, dataDir, cacheCfg, assets, shutdown };
 }
 
 // Auto-start only when run directly (`node hub/server.js`), not when imported.
@@ -410,10 +467,11 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
       ` ops/trip=${num(process.env.SIANO_MAX_OPS_PER_TRIP, 0) || "∞"}` +
       ` trips=${num(process.env.SIANO_MAX_TRIPS, 0) || "∞"}`);
     log(`  origins    : ${process.env.SIANO_ALLOWED_ORIGINS || "(any — allowlist off)"}`);
-    const cc = hub.cacheCfg;
+    const cc = hub.cacheCfg.raw;
     const show = (v) => (v === "" ? "(omitted)" : v);
+    log(`  asset hashing: ${hub.assets ? `on (${hub.assets.count} fingerprinted — cache immutable, no purge needed)` : "off (set SIANO_ASSET_HASHING=1)"}`);
     log(`  static cache: assets="${show(cc.asset)}" cdn="${show(cc.cdn)}" sw="${show(cc.sw)}"` +
-      `${cc.asset === "no-cache" ? " (dev default — revalidate always)" : ""}`);
+      `${!hub.assets && cc.asset === "no-cache" ? " (dev default — revalidate always)" : ""}`);
     log(`  debug logs : ${DEBUG ? "on" : "off (set SIANO_DEBUG=1 for per-request/op logs)"}`);
     if (HOST === "127.0.0.1" || HOST === "localhost") {
       // The bind default changed to loopback during hardening. If cloudflared

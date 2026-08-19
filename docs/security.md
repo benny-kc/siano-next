@@ -39,7 +39,7 @@ What a Cloudflare Tunnel gives you, and what it doesn't:
 | **Non-blocking writes** | Op persistence is async with a per-trip serialized write queue; a write flood can't block the event loop, and torn/failed writes are logged, not fatal. |
 | **Input validation** | Trip ids are validated (`^[A-Za-z0-9._~-]{1,SIANO_TRIP_ID_MAX}$`) before use as a filename; ops are shape-checked; malformed frames are dropped. |
 | **Static server** | GET/HEAD only (else `405`); path-traversal blocked (resolved path must stay under the client dir); a `/healthz` endpoint for probes. |
-| **Cache freshness** | Static responses carry a configurable `Cache-Control` **+ `CDN-Cache-Control`** with a strong `ETag`; conditional GETs return `304`. The default (`no-cache`) makes browser and CDN (Cloudflare honours these) revalidate every load, so a new release is picked up at once — ideal during development. Set `SIANO_CACHE_CONTROL` to a caching policy for production. The **service worker** has its own knob (`SIANO_SW_CACHE_CONTROL`, default `no-cache`) and stays fresh regardless, because a cached SW never updates and its cache-first shell would serve the old UI forever. `/env.js` is always `no-store`. |
+| **Cache freshness** | Static responses carry a configurable `Cache-Control` **+ `CDN-Cache-Control`** with a strong `ETag`; conditional GETs return `304`. Default (`no-cache`) makes browser and CDN revalidate every load, so a new release shows up at once — ideal for development. For production, `SIANO_ASSET_HASHING=1` serves content-hashed asset URLs so they cache forever with **no purge** on deploy (only the tiny `no-cache` shell + service worker revalidate). The **service worker** has its own knob (`SIANO_SW_CACHE_CONTROL`, default `no-cache`) and stays fresh regardless, because a cached SW never updates and its cache-first shell would serve the old UI forever. `/env.js` is always `no-store`. |
 | **Security headers** | A tight `Content-Security-Policy` (`default-src 'self'`, same-origin scripts, WebSocket only back to origin, no third-party anything), plus `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and a minimal `Permissions-Policy`. |
 | **Origin allowlist** | Optional `SIANO_ALLOWED_ORIGINS` (comma-separated). When set, WebSocket upgrades from any other `Origin` (or none, from a browser) are rejected `403` — defeats cross-site WebSocket hijacking if a trip URL ever leaks. |
 | **Graceful shutdown** | `SIGINT`/`SIGTERM` stop the heartbeat, close all sockets (`1001`), stop accepting, and flush pending writes. |
@@ -59,7 +59,8 @@ What a Cloudflare Tunnel gives you, and what it doesn't:
 | `SIANO_MAX_TRIPS` | `0` (∞) | Refuse creating new trip files past this many. **Set one if trip creation is unauthenticated.** |
 | `SIANO_HEARTBEAT_MS` | `30000` | Ping/reap interval. |
 | `SIANO_TRIP_ID_MAX` | `128` | Max trip-id length. |
-| `SIANO_CACHE_CONTROL` | `no-cache` | `Cache-Control` for static assets + the HTML shell. `no-cache` = store but always revalidate (dev-friendly; a Cloudflare purge always suffices). For production set a caching policy, e.g. `public, max-age=300` or `public, max-age=31536000, immutable`. Empty (`SIANO_CACHE_CONTROL=`) omits the header so Cloudflare uses its extension defaults. |
+| `SIANO_ASSET_HASHING` | *(off)* | When on (`1`/`true`), serve the JS/CSS/manifest at **content-hashed URLs** (`/js/app.<hash>.js`) computed in memory at startup — the ESM import graph, `index.html` and the service worker are rewritten to match. Hashed URLs change when the bytes do, so they can be cached forever and a new release is picked up **without a purge**. Flips the asset default to `immutable` (below). Source files on disk are untouched — still buildless. |
+| `SIANO_CACHE_CONTROL` | `no-cache` *(→ `public, max-age=31536000, immutable` when `SIANO_ASSET_HASHING` is on)* | `Cache-Control` for static assets. Default `no-cache` = store but always revalidate (dev-friendly; a Cloudflare purge always suffices); with hashing on the default is `immutable`. Set it explicitly for a custom policy, e.g. `public, max-age=300`. Empty (`SIANO_CACHE_CONTROL=`) omits the header so Cloudflare uses its extension defaults. The HTML shell is `no-cache` whenever hashing is on (it names the current hashed URLs). |
 | `SIANO_CDN_CACHE_CONTROL` | *(= `SIANO_CACHE_CONTROL`)* | `CDN-Cache-Control` — the CDN-scoped directive Cloudflare honours independently of the browser's `Cache-Control`. Defaults to the same value; set it to cache at the edge while telling browsers something else. Empty omits it. |
 | `SIANO_SW_CACHE_CONTROL` | `no-cache` | `Cache-Control` (and `CDN-Cache-Control`) for `/service-worker.js` only. Keep it `no-cache` — a cached service worker never updates, so its cache-first shell serves the old UI forever. Its own knob so you can cache everything else aggressively in production. |
 | `SIANO_DEBUG` | *(off)* | Verbose **hub** logging (per-request/per-op; op type + ids only, never payloads). Troubleshooting only. |
@@ -76,14 +77,19 @@ node hub/server.js
 ```
 
 During development keep the cache defaults (everything `no-cache`) so a Cloudflare
-purge always shows the latest build. Once the UI is stable, enable edge caching —
-the service worker stays fresh on its own knob:
+purge always shows the latest build. Once the UI is stable, turn on content-hashed
+asset URLs — then assets are cached forever and a deploy needs **no purge** (only
+the tiny `no-cache` shell + service worker revalidate; the service worker stays
+fresh on its own knob):
 
 ```bash
 # …plus the production vars above
-SIANO_CACHE_CONTROL="public, max-age=300" \
+SIANO_ASSET_HASHING=1 \
 node hub/server.js
 ```
+
+(Or, without hashing, set `SIANO_CACHE_CONTROL="public, max-age=300"` for a short
+edge TTL — simpler, but then purge on each deploy or wait out the TTL.)
 
 ## Deployment-level hardening (do these too)
 
@@ -128,11 +134,13 @@ The code can't do these for you:
    `.js`/`.css` by extension even with no origin cache directives) keeps being
    served until its TTL lapses — the classic "my old UI is still showing"
    symptom. Do a one-time **Purge Everything** (Cloudflare → Caching →
-   Configuration) after switching to these headers. Once you turn on edge caching
-   in production (`SIANO_CACHE_CONTROL`), purge on each deploy (or use hashed
-   asset names). If you run a "Cache Everything" page rule or a Browser-Cache-TTL
-   override, exempt `/service-worker.js` and `/index.html` so the edge respects
-   their `no-cache`.
+   Configuration) after switching to these headers. For production, prefer
+   `SIANO_ASSET_HASHING=1` — hashed URLs change per deploy, so **no purge is ever
+   needed** (only the tiny `no-cache` shell + service worker revalidate). If you
+   instead set a plain `SIANO_CACHE_CONTROL` TTL without hashing, purge on each
+   deploy (or wait out the TTL). If you run a "Cache Everything" page rule or a
+   Browser-Cache-TTL override, exempt `/service-worker.js` and `/index.html` so
+   the edge respects their `no-cache`.
 
 ## Known limitations / roadmap
 
