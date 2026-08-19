@@ -196,8 +196,23 @@ async function main() {
   });
   sync.connect();
 
+  // Register the service worker so the shell works offline. Two anti-staleness
+  // measures so a new release is actually picked up (the SW's own cache is
+  // cache-first, so without these a returning device can keep serving the old
+  // shell): `updateViaCache: "none"` stops the browser HTTP cache from pinning
+  // the SW script, and — since the SW skipWaiting()s + claims on activate — a
+  // one-time reload when a *new* worker takes control swaps the page over to the
+  // fresh shell. Guarded so the very first install (no prior controller) never
+  // triggers a reload. (The hub also serves the SW `no-cache`; see server.js.)
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloading || !hadController) return; // first install → no reload
+      reloading = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register("/service-worker.js", { updateViaCache: "none" }).catch(() => {});
   }
 }
 

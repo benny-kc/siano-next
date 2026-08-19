@@ -39,6 +39,7 @@ What a Cloudflare Tunnel gives you, and what it doesn't:
 | **Non-blocking writes** | Op persistence is async with a per-trip serialized write queue; a write flood can't block the event loop, and torn/failed writes are logged, not fatal. |
 | **Input validation** | Trip ids are validated (`^[A-Za-z0-9._~-]{1,SIANO_TRIP_ID_MAX}$`) before use as a filename; ops are shape-checked; malformed frames are dropped. |
 | **Static server** | GET/HEAD only (else `405`); path-traversal blocked (resolved path must stay under the client dir); a `/healthz` endpoint for probes. |
+| **Cache freshness** | The client is buildless (unhashed filenames), so every static response is `Cache-Control: no-cache` **+ `CDN-Cache-Control: no-cache`** with a strong `ETag`, and conditional GETs return `304`. Browser and CDN (Cloudflare honours these) may store but must revalidate, so a new release — critically the service worker — is picked up immediately instead of a stale shell being served forever. `/env.js` is `no-store`. |
 | **Security headers** | A tight `Content-Security-Policy` (`default-src 'self'`, same-origin scripts, WebSocket only back to origin, no third-party anything), plus `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and a minimal `Permissions-Policy`. |
 | **Origin allowlist** | Optional `SIANO_ALLOWED_ORIGINS` (comma-separated). When set, WebSocket upgrades from any other `Origin` (or none, from a browser) are rejected `403` — defeats cross-site WebSocket hijacking if a trip URL ever leaks. |
 | **Graceful shutdown** | `SIGINT`/`SIGTERM` stop the heartbeat, close all sockets (`1001`), stop accepting, and flush pending writes. |
@@ -108,6 +109,16 @@ The code can't do these for you:
 6. **Watch disk.** Even with per-trip caps, unauthenticated trip creation can
    grow the log directory; alert on disk usage and prefer `SIANO_MAX_TRIPS` +
    Cloudflare Access over hoping.
+7. **Purge the CDN once after a deploy that changed already-cached assets.** The
+   hub now sends `no-cache` + `ETag`, but any copy Cloudflare cached *before*
+   those headers existed (it edge-caches `.js`/`.css` by extension even with no
+   origin cache directives) keeps being served until its TTL lapses — which is
+   the classic "my old UI is still showing" symptom. Do a one-time **Purge
+   Everything** (Cloudflare → Caching → Configuration) after this change; from
+   then on the revalidation headers keep every release fresh. If you run a
+   "Cache Everything" page rule or a Browser-Cache-TTL override, exempt
+   `/service-worker.js` and `/index.html` (and ideally the whole app) so the
+   edge respects `no-cache`.
 
 ## Known limitations / roadmap
 

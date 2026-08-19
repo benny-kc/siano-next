@@ -25,6 +25,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WebSocketServer } from "./ws.js";
 import { TripLogs, isValidOp } from "./log.js";
@@ -85,6 +86,35 @@ function setSecurityHeaders(res) {
   res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=(self)");
 }
 
+// Caching policy for static responses.
+//
+// The client is a buildless app: filenames are NOT content-hashed, so a deploy
+// reuses the same URLs (`/js/app.js`, `/css/app.css`, `/index.html`,
+// `/service-worker.js`). With no cache headers at all, a CDN in front — this hub
+// is meant to sit behind a Cloudflare Tunnel — edge-caches `.js`/`.css` by
+// extension and can pin the service worker, so a browser keeps being handed the
+// OLD bundle / OLD service worker and never sees a new release. That is exactly
+// the "old interface is still served" symptom.
+//
+// So every static response is `no-cache`: the browser (and Cloudflare, which
+// honours origin `Cache-Control` and will not serve `no-cache` from its edge
+// without revalidating) may STORE the file but must REVALIDATE it every time.
+// We pair it with a strong `ETag` (a hash of the bytes) and answer conditional
+// requests with 304, so revalidation is a tiny empty round-trip when nothing
+// changed but picks up a new build instantly when it does. `CDN-Cache-Control`
+// (the standard CDN-scoped directive, understood by Cloudflare and others)
+// mirrors it so an edge that separates the two still never serves a stale shell.
+//
+// The service worker is the most important one to keep fresh: if it is cached,
+// its own cache-first shell wins forever. `/env.js` stays `no-store` (below).
+function setCacheHeaders(res, etag) {
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("CDN-Cache-Control", "no-cache");
+  if (etag) res.setHeader("ETag", etag);
+}
+
+const etagOf = (data) => `"${createHash("sha1").update(data).digest("base64")}"`;
+
 function serveStatic(req, res) {
   setSecurityHeaders(res);
 
@@ -106,6 +136,7 @@ function serveStatic(req, res) {
     res.writeHead(200, {
       "content-type": "text/javascript; charset=utf-8",
       "cache-control": "no-store",
+      "cdn-cache-control": "no-store",
     });
     res.end(req.method === "HEAD" ? undefined : `window.__SIANO_DEBUG__=${on};`);
     return;
@@ -126,6 +157,14 @@ function serveStatic(req, res) {
   fs.readFile(full, (err, data) => {
     if (err) {
       res.writeHead(404, { "content-type": "text/plain" }).end("not found");
+      return;
+    }
+    const etag = etagOf(data);
+    setCacheHeaders(res, etag);
+    // Conditional GET: if the client already holds this exact version, don't
+    // resend the bytes — a tiny 304 keeps `no-cache` revalidation cheap.
+    if (req.headers["if-none-match"] === etag) {
+      res.writeHead(304).end();
       return;
     }
     res.writeHead(200, { "content-type": MIME[path.extname(full)] || "application/octet-stream" });

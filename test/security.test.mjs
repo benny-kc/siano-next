@@ -117,6 +117,30 @@ test("static responses carry security headers", async (t) => {
   assert.equal(res.headers["x-frame-options"], "DENY");
 });
 
+test("static responses are revalidated (no-cache + ETag), so a CDN never pins a stale shell", async (t) => {
+  const { port } = await startHub(t);
+  const head = (path, headers = {}) =>
+    new Promise((resolve) => http.get({ host: "127.0.0.1", port, path, headers }, (r) => { r.resume(); resolve(r); }));
+
+  // The shell + assets must be revalidated every load (unhashed filenames behind
+  // a CDN like Cloudflare, which honours these): browser AND CDN scope.
+  for (const p of ["/", "/index.html", "/js/app.js", "/service-worker.js", "/css/app.css"]) {
+    const r = await head(p);
+    assert.equal(r.headers["cache-control"], "no-cache", `${p} must be no-cache`);
+    assert.equal(r.headers["cdn-cache-control"], "no-cache", `${p} must be no-cache for the CDN`);
+    assert.ok(r.headers["etag"], `${p} must carry an ETag`);
+  }
+
+  // A conditional GET with the current ETag revalidates cheaply as a 304.
+  const first = await head("/service-worker.js");
+  const again = await head("/service-worker.js", { "If-None-Match": first.headers["etag"] });
+  assert.equal(again.statusCode, 304);
+
+  // The operator debug flag must never be cached at all.
+  const env = await head("/env.js");
+  assert.equal(env.headers["cache-control"], "no-store");
+});
+
 test("non-GET methods are rejected (405)", async (t) => {
   const { port } = await startHub(t);
   const status = await new Promise((resolve) => {
