@@ -42,7 +42,11 @@ export class WebSocketServer extends EventEmitter {
     httpServer.on("upgrade", (req, socket) => this._upgrade(req, socket));
   }
 
-  _reject(socket, status, reason) {
+  _reject(socket, status, reason, detail) {
+    // Surface WHY an upgrade was refused so the hub can log it — a silent 403/503
+    // is exactly the kind of thing that makes "the app just stopped working"
+    // impossible to diagnose.
+    this.emit("reject", { status, reason, detail, origin: socket._sianoOrigin });
     try {
       socket.write(
         `HTTP/1.1 ${status} ${reason}\r\n` +
@@ -56,11 +60,12 @@ export class WebSocketServer extends EventEmitter {
   }
 
   _upgrade(req, socket) {
+    socket._sianoOrigin = req.headers.origin; // for reject logging
     if ((req.headers.upgrade || "").toLowerCase() !== "websocket") {
-      return this._reject(socket, 400, "Bad Request");
+      return this._reject(socket, 400, "Bad Request", "not a websocket upgrade");
     }
     const key = req.headers["sec-websocket-key"];
-    if (!key) return this._reject(socket, 400, "Bad Request");
+    if (!key) return this._reject(socket, 400, "Bad Request", "missing Sec-WebSocket-Key");
 
     // Origin allowlist: browsers always send Origin, so an unexpected or missing
     // Origin from a browser is rejected. (Only enforced when configured, so
@@ -68,12 +73,12 @@ export class WebSocketServer extends EventEmitter {
     if (this.allowedOrigins) {
       const origin = req.headers.origin;
       if (!origin || !this.allowedOrigins.has(origin)) {
-        return this._reject(socket, 403, "Forbidden");
+        return this._reject(socket, 403, "Forbidden", `origin not allowed: ${origin || "(none)"}`);
       }
     }
 
     if (this.connections.size >= this.maxConnections) {
-      return this._reject(socket, 503, "Service Unavailable");
+      return this._reject(socket, 503, "Service Unavailable", `at connection cap ${this.maxConnections}`);
     }
 
     const accept = crypto.createHash("sha1").update(key + GUID).digest("base64");

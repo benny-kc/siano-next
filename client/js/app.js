@@ -11,6 +11,7 @@ import { openTripStore } from "./store/oplog.js";
 import { SyncClient } from "./sync/client.js";
 import * as ops from "./core/ops.js";
 import { render } from "./ui/board.js";
+import { dlog, derror } from "./log.js";
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const uid = (p) =>
@@ -40,7 +41,9 @@ function wsUrl() {
 
 async function main() {
   const tripId = currentTripId();
+  dlog("boot: trip", tripId, "at", location.href);
   const log = await openTripStore(tripId);
+  dlog(`boot: store opened — ${log.allOps().length} ops on device`, "device", log.device);
 
   const board = document.getElementById("board");
   const netEl = document.getElementById("net");
@@ -70,11 +73,17 @@ async function main() {
   };
 
   function paint() {
-    const snap = log.snapshot();
-    // Keep the trip-name field in sync without stomping the user mid-type.
-    if (document.activeElement !== nameEl) nameEl.value = snap.name || "";
-    document.title = snap.name ? `${snap.name} · Siano` : "Siano";
-    render(board, snap, actions);
+    try {
+      const snap = log.snapshot();
+      // Keep the trip-name field in sync without stomping the user mid-type.
+      if (document.activeElement !== nameEl) nameEl.value = snap.name || "";
+      document.title = snap.name ? `${snap.name} · Siano` : "Siano";
+      render(board, snap, actions);
+    } catch (e) {
+      // A render exception must not silently leave a blank board — surface it.
+      derror("render failed", e);
+      board.textContent = "Something went wrong rendering the board — see console.";
+    }
   }
 
   // Coalesce renders into an animation frame. Rendering must never run
@@ -124,6 +133,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(e);
+  derror("failed to start", e);
   document.getElementById("board").textContent = "Failed to start: " + e.message;
 });

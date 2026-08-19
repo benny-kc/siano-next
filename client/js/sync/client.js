@@ -13,6 +13,8 @@
 //   client -> hub  { t:"op",    op }               // a new local op
 //   hub -> client  { t:"op",    op } | { t:"ops", ops:[...] }   // fan-out
 
+import { dlog, dwarn } from "../log.js";
+
 export class SyncClient {
   /**
    * @param {string} url   ws:// or wss:// hub URL
@@ -54,13 +56,16 @@ export class SyncClient {
 
   _open() {
     this.onStatus("connecting");
+    dlog("sync: connecting to", this.url);
     const ws = new WebSocket(this.url);
     this.ws = ws;
 
     ws.onopen = () => {
       this.backoff = 1000;
       this.onStatus("open");
-      this._send({ t: "hello", trip: this.log.tripId, have: this.log.have() });
+      const have = this.log.have();
+      dlog(`sync: open — hello trip=${this.log.tripId} have=${have.length} ops`);
+      this._send({ t: "hello", trip: this.log.tripId, have });
     };
 
     ws.onmessage = (ev) => {
@@ -68,23 +73,40 @@ export class SyncClient {
       try {
         msg = JSON.parse(ev.data);
       } catch {
+        dwarn("sync: received non-JSON frame, ignored");
         return;
       }
-      if (msg.t === "op" && msg.op) this.log.ingestMany([msg.op]);
-      else if ((msg.t === "ops" || msg.t === "sync") && Array.isArray(msg.ops)) {
-        this.log.ingestMany(msg.ops);
+      if (msg.t === "op" && msg.op) {
+        const added = this.log.ingestMany([msg.op]);
+        dlog(`sync: recv op (${added.length ? "new" : "dup"})`);
+      } else if ((msg.t === "ops" || msg.t === "sync") && Array.isArray(msg.ops)) {
+        const added = this.log.ingestMany(msg.ops);
+        dlog(`sync: recv ${msg.t} — ${msg.ops.length} ops, ${added.length} new`);
+      } else {
+        dlog("sync: recv unknown message", msg.t);
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       this.onStatus("closed");
+      // An abnormal close code is the single most useful troubleshooting signal:
+      // 1008 = rejected (rate limit / bad trip id), 1009 = message too big,
+      // 1006 = never established (often an upgrade 403/blocked, or hub down).
+      if (!this.closed && ev && ev.code !== 1000 && ev.code !== 1001) {
+        dwarn(`sync: closed code=${ev.code}${ev.reason ? " reason=" + ev.reason : ""} — will reconnect`);
+      } else {
+        dlog(`sync: closed code=${ev?.code}`);
+      }
       if (this.closed) return;
       const wait = this.backoff;
       this.backoff = Math.min(this.backoff * 2, this.maxBackoff);
       setTimeout(() => !this.closed && this._open(), wait);
     };
 
-    ws.onerror = () => ws.close();
+    ws.onerror = (e) => {
+      dwarn("sync: websocket error", e?.message || "(no detail — often an upgrade rejection or unreachable hub)");
+      ws.close();
+    };
   }
 
   _send(obj) {

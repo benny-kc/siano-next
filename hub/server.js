@@ -34,6 +34,19 @@ const CLIENT_DIR = path.resolve(__dirname, "../client");
 
 const num = (v, d) => (v == null || v === "" || Number.isNaN(Number(v)) ? d : Number(v));
 
+// ---- Logging ---------------------------------------------------------------
+// Concise, always-on operational logs; verbose per-request/per-op logs behind
+// SIANO_DEBUG=1. Op payloads are NEVER fully dumped (they carry trip data) —
+// only the op type + ids + lamport, so logs stay privacy-safe.
+const DEBUG = /^(1|true|yes|on)$/i.test(process.env.SIANO_DEBUG || "");
+const ts = () => new Date().toISOString();
+const log = (...a) => console.log(ts(), ...a);
+const warn = (...a) => console.warn(ts(), "WARN", ...a);
+const debug = DEBUG ? (...a) => console.log(ts(), "DEBUG", ...a) : () => {};
+const opBrief = (op) =>
+  `${op.op}${op.mealId ? " meal=" + op.mealId : ""}${op.memberId ? " member=" + op.memberId : ""} @${op.lamport}.${op.device}`;
+const clientIp = (req) => req.headers["cf-connecting-ip"] || req.socket?.remoteAddress || "?";
+
 // ---- Static client ---------------------------------------------------------
 
 const MIME = {
@@ -81,6 +94,7 @@ function serveStatic(req, res) {
   }
 
   const url = new URL(req.url, "http://localhost");
+  debug(`http ${req.method} ${url.pathname} from ${clientIp(req)}`);
   if (url.pathname === "/healthz") {
     res.writeHead(200, { "content-type": "text/plain" }).end("ok");
     return;
@@ -181,9 +195,19 @@ export function createHub(opts = {}) {
 
   const wss = new WebSocketServer(httpServer, { maxMessageBytes, maxConnections, allowedOrigins });
 
-  wss.on("connection", (conn) => {
+  // Log every refused upgrade — this is where "why can't anyone connect?"
+  // usually gets answered (Origin allowlist, connection cap, bad request).
+  wss.on("reject", ({ status, reason, detail, origin }) => {
+    warn(`ws upgrade rejected ${status} ${reason}${detail ? " — " + detail : ""}${origin ? " (origin " + origin + ")" : ""}`);
+  });
+
+  wss.on("connection", (conn, req) => {
+    conn.ip = clientIp(req);
+    debug(`ws open from ${conn.ip} (origin ${req.headers.origin || "none"}); ${wss.connections.size} live`);
+
     conn.on("message", async (data) => {
       if (!allow(conn)) {
+        warn(`ws rate limit hit (${maxMsgsPerSec}/s) trip=${conn.trip || "?"} ip=${conn.ip} — closing 1008`);
         conn.close(1008); // policy violation — too chatty
         return;
       }
@@ -192,36 +216,65 @@ export function createHub(opts = {}) {
       try {
         msg = JSON.parse(data);
       } catch {
+        debug(`ws bad JSON (${data.length} bytes) from ${conn.ip} — ignored`);
         return;
       }
       if (!msg || typeof msg !== "object") return;
 
       if (msg.t === "hello") {
         if (!isValidTripId(msg.trip)) {
+          warn(`ws invalid trip id from ${conn.ip}: ${JSON.stringify(msg.trip)?.slice(0, 40)} — closing 1008`);
           conn.close(1008);
           return;
         }
         conn.trip = msg.trip;
         join(msg.trip, conn);
+        const delta = logs.missing(msg.trip, msg.have);
+        debug(`ws hello trip=${msg.trip} have=${Array.isArray(msg.have) ? msg.have.length : 0} -> sync ${delta.length} ops`);
         // Hand the newcomer everything it's missing (delta on reconnect).
-        conn.send(JSON.stringify({ t: "sync", ops: logs.missing(msg.trip, msg.have) }));
+        conn.send(JSON.stringify({ t: "sync", ops: delta }));
         return;
       }
 
-      if (!conn.trip) return; // must say hello first
+      if (!conn.trip) {
+        debug(`ws message ${msg.t} before hello from ${conn.ip} — ignored`);
+        return; // must say hello first
+      }
 
       if (msg.t === "op" && isValidOp(msg.op)) {
-        if (await logs.append(conn.trip, msg.op)) fanout(conn.trip, { t: "op", op: msg.op }, conn);
+        if (await logs.append(conn.trip, msg.op)) {
+          debug(`ws op trip=${conn.trip} ${opBrief(msg.op)} -> fanout`);
+          fanout(conn.trip, { t: "op", op: msg.op }, conn);
+        } else {
+          debug(`ws op trip=${conn.trip} ${opBrief(msg.op)} -> dup/capped (no fanout)`);
+        }
       } else if (msg.t === "ops" && Array.isArray(msg.ops)) {
         const added = [];
         for (const op of msg.ops) {
           if (isValidOp(op) && (await logs.append(conn.trip, op))) added.push(op);
         }
+        debug(`ws ops trip=${conn.trip} received=${msg.ops.length} new=${added.length}`);
         if (added.length) fanout(conn.trip, { t: "ops", ops: added }, conn);
+      } else {
+        debug(`ws unknown message t=${msg.t} trip=${conn.trip} — ignored`);
       }
     });
 
-    conn.on("close", () => leave(conn));
+    conn.on("close", () => {
+      leave(conn);
+      debug(`ws close trip=${conn.trip || "?"} ip=${conn.ip}; ${wss.connections.size} live`);
+    });
+  });
+
+  // Surface low-level HTTP client errors (malformed requests, early hangups)
+  // instead of Node swallowing them.
+  httpServer.on("clientError", (err, socket) => {
+    debug(`http clientError: ${err.code || err.message}`);
+    try {
+      socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+    } catch {
+      /* already gone */
+    }
   });
 
   // Heartbeat: ping every connection each interval; reap any that missed the
@@ -257,11 +310,26 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   const PORT = num(process.env.PORT, 4000);
   const hub = createHub();
   hub.httpServer.listen(PORT, HOST, () => {
-    console.log(`siano hub listening on http://${HOST}:${PORT}`);
-    console.log(`  serving client from ${CLIENT_DIR}`);
-    console.log(`  op logs under        ${path.join(hub.dataDir, "logs")}`);
-    if (HOST !== "127.0.0.1" && HOST !== "localhost") {
-      console.warn("  ⚠ bound to a non-loopback address — expose via a tunnel/proxy, not directly.");
+    log(`siano hub listening on http://${HOST}:${PORT}`);
+    log(`  client dir : ${CLIENT_DIR}`);
+    log(`  op logs    : ${path.join(hub.dataDir, "logs")}`);
+    log(`  limits     : msg=${num(process.env.SIANO_MAX_MSG_BYTES, 256 * 1024)}B` +
+      ` conns=${num(process.env.SIANO_MAX_CONNECTIONS, 500)}` +
+      ` rate=${num(process.env.SIANO_MAX_MSGS_PER_SEC, 50)}/s` +
+      ` ops/trip=${num(process.env.SIANO_MAX_OPS_PER_TRIP, 0) || "∞"}` +
+      ` trips=${num(process.env.SIANO_MAX_TRIPS, 0) || "∞"}`);
+    log(`  origins    : ${process.env.SIANO_ALLOWED_ORIGINS || "(any — allowlist off)"}`);
+    log(`  debug logs : ${DEBUG ? "on" : "off (set SIANO_DEBUG=1 for per-request/op logs)"}`);
+    if (HOST === "127.0.0.1" || HOST === "localhost") {
+      // The bind default changed to loopback during hardening. If cloudflared
+      // (or any proxy) reaches this over a network — a separate container, a
+      // different host, a non-host Docker network — loopback refuses it and the
+      // app "stops working" with a 502 at the edge. Make that impossible to miss.
+      log("  ⚠ bound to LOOPBACK only. If your tunnel/proxy connects over a network");
+      log("    (e.g. cloudflared in another container), set HOST=0.0.0.0 and keep");
+      log("    the port private via the tunnel + firewall.");
+    } else {
+      warn("bound to a non-loopback address — make sure only your tunnel/proxy can reach this port.");
     }
   });
   for (const sig of ["SIGINT", "SIGTERM"]) {
