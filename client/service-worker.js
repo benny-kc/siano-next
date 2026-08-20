@@ -3,7 +3,26 @@
 // Strategy: cache-first for our own GET assets, falling back to the network and
 // caching what it fetches. WebSocket sync traffic is untouched.
 
-const CACHE = "siano-shell-v12";
+const CACHE = "siano-shell-v13";
+
+// The operator debug flag (/env.js) must stay live (never cached) when online,
+// but it is a render-blocking classic <script> in index.html — so if it ever
+// touches a dead/slow network the whole app boot freezes behind it (the reason
+// an offline device used to sit on "0 bills" for ~10-20s before the local DB
+// rendered). Race the network against a short timeout and fall back to a safe
+// default so an offline / poor-coverage device boots instantly. Never cached.
+const ENV_TIMEOUT_MS = 1500;
+const ENV_FALLBACK = "window.__SIANO_DEBUG__=false;";
+function envJs(req) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ENV_TIMEOUT_MS);
+  return fetch(req, { cache: "no-store", signal: ctrl.signal })
+    .then((res) => (res && res.ok ? res : Promise.reject()))
+    .catch(() => new Response(ENV_FALLBACK, {
+      headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" },
+    }))
+    .finally(() => clearTimeout(timer));
+}
 const SHELL = [
   "/",
   "/index.html",
@@ -52,7 +71,9 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // don't touch cross-origin
-  if (url.pathname === "/env.js") return; // operator debug flag — always live, never cached
+  // Operator debug flag: network-first (stays live, never cached) but with an
+  // instant offline fallback so it can never stall the boot. See envJs() above.
+  if (url.pathname === "/env.js") { e.respondWith(envJs(req)); return; }
 
   // A trip deep-link (/t/<id>) always resolves to the app shell.
   if (url.pathname.startsWith("/t/")) {

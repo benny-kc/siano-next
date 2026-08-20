@@ -234,8 +234,13 @@ today — keep `core/*` and `ui/*` acyclic (the topo sort depends on it).
   `SHELL` list AND bump the `CACHE` version in `client/service-worker.js`, or
   installed PWAs keep serving the old cached shell (cache-first) / 404 the new
   import. (SW is currently `v3`.)
-- **`/env.js` must stay non-cached** (server `no-store` + SW bypass) so the debug
-  flag is always live.
+- **`/env.js` must stay non-cached** (server `no-store`) so the debug flag is
+  always live. The service worker serves it **network-first with a short timeout
+  and a safe offline fallback** (`window.__SIANO_DEBUG__=false`) — never caching
+  it — because it is a render-blocking classic `<script>` in `index.html`: a
+  plain network bypass made an offline/poor-coverage device freeze the whole boot
+  behind it (~10-20s on "0 bills" before the local DB rendered). Keep it uncached
+  and keep the fallback fast; don't turn it back into a bare bypass.
 - Client frames are masked; the hub's WS parser enforces it. Server→client frames
   are never masked.
 - **The board repaints wholesale, so anything a repaint must not disturb lives on
