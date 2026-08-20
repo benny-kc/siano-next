@@ -20,6 +20,7 @@
 import { format } from "../core/money.js";
 import { selectedMember } from "./selection.js";
 import { encodeText } from "../vendor/qrcode.js";
+import { loadTrips } from "../store/trips.js";
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -309,6 +310,7 @@ function renderMenu(snap, actions) {
     settleSection(snap),
     ledgerSection(snap, actions),
     tripNameSection(snap, actions),
+    tripsSection(snap, actions),
     helpSection(),
     disclaimerSection(),
   );
@@ -440,6 +442,41 @@ function tripNameSection(snap, actions) {
       el("button", { type: "button", class: "btn-block", onclick: () => actions.newTrip() }, "✨ New trip"),
     ),
   );
+}
+
+// "Your trips" — the device-local list (localStorage), so this viewer can switch
+// between the trips they've opened. Every trip visited is remembered
+// automatically; the current one is flagged and can't remove itself.
+function tripsSection(snap, actions) {
+  const trips = loadTrips();
+  const list = trips.length === 0
+    ? el("p", { class: "muted-note" }, "No trips yet.")
+    : el("ul", { class: "trip-list" },
+        ...trips.map((t) => {
+          const isCurrent = t.id === snap.id;
+          const name = t.name || "Untitled trip";
+          return el("li", { class: "trip-item" },
+            el("button", {
+              type: "button", class: "trip-open", disabled: isCurrent,
+              onclick: () => actions.openTrip(t.id),
+            },
+              el("span", { class: "nm" + (isCurrent ? " current" : "") }, name),
+              el("span", { class: "sub" }, t.id.slice(0, 8) + (isCurrent ? " · current" : "")),
+            ),
+            el("button", {
+              type: "button", class: "trip-icon-btn", title: "Copy link to share", "aria-label": "Copy link to share",
+              onclick: () => actions.shareTripLink(t.id),
+            }, "🔗"),
+            isCurrent
+              ? el("span", { class: "trip-icon-btn", "aria-hidden": "true" })
+              : el("button", {
+                  type: "button", class: "trip-icon-btn remove", title: "Remove from this device", "aria-label": "Remove from this device",
+                  dataset: { confirm: `Remove “${name}” from this device? (The trip itself isn't deleted.)`, confirmAction: `removeTrip:${t.id}` },
+                }, "✕"),
+          );
+        }));
+
+  return el("section", {}, el("h3", {}, "Your trips"), list);
 }
 
 function helpSection() {

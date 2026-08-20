@@ -108,6 +108,7 @@ function wireConfirm(actions) {
 function runConfirm(actions, name, arg) {
   if (name === "deleteMeal") actions.removeMeal(arg);
   else if (name === "removeMember") actions.removeMember(arg);
+  else if (name === "removeTrip") actions.removeTrip(arg);
 }
 
 // ── Edge-swipe drawers (touch only), on document so swipes over an open drawer

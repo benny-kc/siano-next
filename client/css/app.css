@@ -1342,6 +1342,72 @@ button {
   flex-direction: column;
   gap: 0.5rem;
 }
+
+/* "Your trips" switcher */
+.trip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.trip-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.75rem;
+  background: rgba(30, 41, 59, 0.6);
+  padding: 0.5rem 0.75rem;
+}
+.trip-open {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  padding: 0;
+}
+.trip-open[disabled] {
+  cursor: default;
+}
+.trip-open .nm {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--slate-100);
+}
+.trip-open .nm.current {
+  color: var(--amber-300);
+}
+.trip-open .sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  color: var(--slate-500);
+}
+.trip-icon-btn {
+  width: 1.5rem;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  text-align: center;
+  color: var(--slate-600);
+  transition: color 0.15s;
+}
+.trip-icon-btn:hover {
+  color: var(--amber-300);
+}
+.trip-icon-btn.remove:hover {
+  color: var(--rose-400);
+}
 .disclaimer {
   user-select: none;
   border-top: 1px solid var(--slate-800);

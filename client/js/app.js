@@ -14,6 +14,7 @@
 // (pan/zoom) and ui/viewstate.js (drawer state).
 
 import { openTripStore } from "./store/oplog.js";
+import { lastTripId, rememberTrip, forgetTrip } from "./store/trips.js";
 import { SyncClient } from "./sync/client.js";
 import * as ops from "./core/ops.js";
 import { parse } from "./core/money.js";
@@ -41,7 +42,9 @@ function initials(name) {
 function currentTripId() {
   const m = location.pathname.match(/^\/t\/([^/]+)/);
   if (m) return decodeURIComponent(m[1]);
-  const id = uid("trip-");
+  // No trip in the URL (a bare visit to "/"): resume the last trip seen on this
+  // device, or mint a fresh one if there is none yet.
+  const id = lastTripId() || uid("trip-");
   history.replaceState(null, "", `/t/${id}`);
   return id;
 }
@@ -177,11 +180,23 @@ async function main() {
       catch { toast(location.href); }
     },
     newTrip: () => { location.assign(`/t/${uid("trip-")}`); },
+
+    // "Your trips" switcher (device-local list).
+    openTrip: (id) => { if (id && id !== tripId) location.assign(`/t/${encodeURIComponent(id)}`); },
+    shareTripLink: async (id) => {
+      const url = `${location.origin}/t/${encodeURIComponent(id)}`;
+      try { await navigator.clipboard.writeText(url); toast("🔗 Link copied — share it with your group."); }
+      catch { toast(url); }
+    },
+    removeTrip: (id) => { forgetTrip(id); schedulePaint(); },
   };
 
   function paint() {
     try {
-      render(log.snapshot(), actions);
+      const snap = log.snapshot();
+      // Keep this device's trip list current (float to front, sync the name).
+      rememberTrip(snap.id, snap.name || "");
+      render(snap, actions);
     } catch (e) {
       derror("render failed", e);
     }

@@ -123,6 +123,7 @@ Create ops via the `ops.js` constructors (they stamp the clock). Emit them throu
 |---|---|
 | `client/js/store/idb.js` | Tiny promise wrapper over IndexedDB (dependency-free; Dexie-swappable). |
 | `client/js/store/oplog.js` | `OpLog` (pure) + `openTripStore` (IndexedDB-backed): the device's full copy. `emit`/`ingest`/`ingestMany`/`snapshot`/`subscribe`. |
+| `client/js/store/trips.js` | Device-local trip index (localStorage `siano:trips`, most-recent-first): `loadTrips`/`rememberTrip`/`forgetTrip`/`lastTripId`. Powers the Settings "Your trips" switcher and the resume-last-trip behaviour on a bare `/` visit. |
 | `client/js/sync/client.js` | `SyncClient` — WebSocket to hub: hello-with-have, delta-on-reconnect, live fan-out. |
 | `client/js/ui/board.js` | `render(snap, actions)` — repaints the game-like board (meal cards), the dock, the top bar and the drawer/report contents from the snapshot. Holds per-viewer UI state (`ui`: bills filter/sort, inline-share edit, ledger pick). |
 | `client/js/ui/boardview.js` | `BoardView` — pan/zoom kept as CSS vars on `:root` (a repaint never resets the view) + screen↔canvas math. |
