@@ -131,4 +131,18 @@ export class TripLogs {
     const set = new Set(Array.isArray(have) ? have : []);
     return this.all(trip).filter((op) => !set.has(opId(op)));
   }
+
+  /**
+   * The op-ids the caller CLAIMS to have (`have`) that this trip's log is
+   * missing. This is the other direction of the delta: the hub uses it to ask a
+   * (re)connecting leaf to push ops it created while offline — ops that were
+   * only ever persisted on that device and so never reached the hub or the
+   * other leaves. Without this, `missing()` alone only ever pulls ops TO the
+   * newcomer; nothing pulls the newcomer's offline-made ops back UP.
+   */
+  wanted(trip, have) {
+    if (!Array.isArray(have)) return [];
+    const map = this._load(trip);
+    return have.filter((id) => typeof id === "string" && !map.has(id));
+  }
 }

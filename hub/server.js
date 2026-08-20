@@ -378,9 +378,16 @@ export function createHub(opts = {}) {
         conn.trip = msg.trip;
         join(msg.trip, conn);
         const delta = logs.missing(msg.trip, msg.have);
-        debug(`ws hello trip=${msg.trip} have=${Array.isArray(msg.have) ? msg.have.length : 0} -> sync ${delta.length} ops`);
-        // Hand the newcomer everything it's missing (delta on reconnect).
-        conn.send(JSON.stringify({ t: "sync", ops: delta }));
+        // The other direction: op-ids the leaf says it has that we don't. These
+        // are ops it created while offline (they only ever hit its IndexedDB);
+        // ask it to push them so they reach the durable log + the other leaves.
+        // Without this, a device that made bills offline stays the only copy of
+        // them — the reported "one phone has 8 bills, the other only 4" bug.
+        const want = logs.wanted(msg.trip, msg.have);
+        debug(`ws hello trip=${msg.trip} have=${Array.isArray(msg.have) ? msg.have.length : 0} -> sync ${delta.length} ops, want ${want.length}`);
+        // Hand the newcomer everything it's missing (delta on reconnect) and ask
+        // for anything we're missing from it (its offline-made ops).
+        conn.send(JSON.stringify({ t: "sync", ops: delta, want }));
         return;
       }
 

@@ -39,6 +39,11 @@ export class OpLog {
     return this.ops.has(id);
   }
 
+  /** Fetch a single op by its id (used to answer the hub's `want` on reconnect). */
+  get(id) {
+    return this.ops.get(id);
+  }
+
   /** The op-ids this device already holds — the basis for sync delta negotiation. */
   have() {
     return [...this.ops.keys()];

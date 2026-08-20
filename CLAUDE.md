@@ -157,13 +157,19 @@ limit, headers).
 
 ```
 client -> hub  { t:"hello", trip, have:[opId,...] }
-hub -> client  { t:"sync",  ops:[...] }        // ops the client lacked
+hub -> client  { t:"sync",  ops:[...], want:[opId,...] }
+                  // ops the client lacked, PLUS op-ids the hub lacks that the
+                  // client claims to have (its offline-created ops)
+client -> hub  { t:"ops",   ops:[...] }        // answer to `want` (deduped on the hub)
 client -> hub  { t:"op",    op }               // a new local op
 hub -> client  { t:"op", op } | { t:"ops", ops:[...] }   // fan-out (never echoed to sender)
 ```
 
 Sync is additive (ops only appended + deduped by `opId`), so a dropped
-connection loses nothing — reconnect and exchange the delta.
+connection loses nothing — reconnect and exchange the delta. The exchange is
+**bidirectional**: `sync.ops` catches the leaf up, and `sync.want` pulls the
+leaf's offline-made ops back up to the hub (and thence to every other leaf), so
+edits made while a device was offline propagate the moment it reconnects.
 
 ---
 
@@ -250,13 +256,16 @@ today — keep `core/*` and `ui/*` acyclic (the topo sort depends on it).
 
 ## Roadmap / known gaps (good next tasks)
 
-- **Offline op replay on reconnect (bug):** `SyncClient` currently only
-  broadcasts ops created *after* the connection opens; it does **not** push a
-  device's pre-existing local ops on (re)connect. The hub hands the client its
-  delta, but the client doesn't hand the hub *its* unseen ops. Fix: on `hello`,
-  have the hub also reply with what it wants, or have the client push ops the hub
-  is missing (it can diff `have` both directions, or just resend all local ops —
-  they dedupe). Until fixed, ops made while fully offline may not propagate.
+- **Offline op replay on reconnect** ✅ *(fixed)* — `SyncClient` used to only
+  broadcast ops created *after* the connection opened; it did **not** push a
+  device's pre-existing local ops on (re)connect, so bills made while a phone was
+  offline stayed stranded on that one device even after it came back online
+  (the "one phone has 8 bills, the other only 4" report). Fixed by making the
+  `hello`/`sync` exchange bidirectional: the hub diffs the leaf's `have` list
+  both ways and returns `sync.want` (op-ids it's missing that the leaf holds);
+  the client answers by pushing those ops (batched, deduped on the hub). See the
+  Sync protocol section. Regression test: `hub.test.mjs` ("pulls a reconnecting
+  device's offline-made ops back up").
 - **Board is ported** ✅ — the pannable/zoomable board, the traveller dock,
   drag-to-split, draggable meal cards, long-press-to-set-share, the slide-in
   Bills/Settings/Report drawers, help + in-page confirm, and the full game-like

@@ -9,9 +9,16 @@
 //
 // Protocol (JSON text frames):
 //   client -> hub  { t:"hello", trip, have:[opId,...] }
-//   hub -> client  { t:"sync",  ops:[...] }        // ops the client lacked
-//   client -> hub  { t:"op",    op }               // a new local op
+//   hub -> client  { t:"sync",  ops:[...], want:[opId,...] }
+//                     // ops the client lacked, plus op-ids the hub lacks that
+//                     // the client claims to have (its offline-made ops)
+//   client -> hub  { t:"ops",   ops:[...] }         // answer to `want`
+//   client -> hub  { t:"op",    op }                // a new local op
 //   hub -> client  { t:"op",    op } | { t:"ops", ops:[...] }   // fan-out
+//
+// The `want` half is what makes offline edits survive reconnect: without it the
+// hub only ever pushes ops DOWN to a returning leaf; nothing pulls the leaf's
+// offline-created ops back UP, so those bills stay stranded on one device.
 
 import { dlog, dwarn } from "../log.js";
 
@@ -82,6 +89,14 @@ export class SyncClient {
       } else if ((msg.t === "ops" || msg.t === "sync") && Array.isArray(msg.ops)) {
         const added = this.log.ingestMany(msg.ops);
         dlog(`sync: recv ${msg.t} — ${msg.ops.length} ops, ${added.length} new`);
+        // A `sync` may also carry `want`: op-ids the hub is missing that this
+        // device holds — its ops created while offline. Push them so they reach
+        // the durable log + the other leaves. Skipping this is exactly why ops
+        // made while a phone was offline never propagated once it came back
+        // online (the hub only ever pushed ops down to us, never pulled ours up).
+        if (msg.t === "sync" && Array.isArray(msg.want) && msg.want.length) {
+          this._pushWanted(msg.want);
+        }
       } else {
         dlog("sync: recv unknown message", msg.t);
       }
@@ -107,6 +122,26 @@ export class SyncClient {
       dwarn("sync: websocket error", e?.message || "(no detail — often an upgrade rejection or unreachable hub)");
       ws.close();
     };
+  }
+
+  // Answer the hub's `want` list (op-ids it's missing that we hold) by pushing
+  // those ops back. Resolve ids we actually have (a stale/foreign id is just
+  // skipped) and send them in bounded batches — a device that was offline a
+  // long time can accumulate many ops, and a single frame must stay under the
+  // hub's max-message cap (256 KiB by default). The hub dedupes on append, so
+  // re-sending is always safe.
+  _pushWanted(ids) {
+    const ops = [];
+    for (const id of ids) {
+      const op = this.log.get(id);
+      if (op) ops.push(op);
+    }
+    if (!ops.length) return;
+    dlog(`sync: hub wants ${ids.length} ops — pushing ${ops.length} back`);
+    const BATCH = 200;
+    for (let i = 0; i < ops.length; i += BATCH) {
+      this._send({ t: "ops", ops: ops.slice(i, i + BATCH) });
+    }
   }
 
   _send(obj) {
