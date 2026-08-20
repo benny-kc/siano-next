@@ -23,6 +23,7 @@ import { BoardView } from "./ui/boardview.js";
 import { installViewState } from "./ui/viewstate.js";
 import { initInteractions } from "./ui/interactions.js";
 import { applyTypography, setFont, stepScale, toggleBold, resetTypography, SCALE_STEP } from "./ui/typography.js";
+import { installFullscreen, fullscreenPreferred, setFullscreenPreferred } from "./ui/fullscreen.js";
 import { dlog, derror } from "./log.js";
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
@@ -75,6 +76,7 @@ async function main() {
 
   installViewState();
   applyTypography(); // restore this device's font/size/boldness before first paint
+  installFullscreen(); // honour the per-device "always full-screen" preference
 
   let interactions; // set after init (below); openMeal needs its panToMeal
 
@@ -187,6 +189,7 @@ async function main() {
     setFont: (id) => { setFont(id); schedulePaint(); },
     stepTextSize: (dir) => { stepScale(dir * SCALE_STEP); schedulePaint(); },
     toggleBold: () => { toggleBold(); schedulePaint(); },
+    toggleFullscreen: () => { setFullscreenPreferred(!fullscreenPreferred()); schedulePaint(); },
     resetAppearance: () => { resetTypography(); schedulePaint(); },
 
     // "Your trips" switcher (device-local list).

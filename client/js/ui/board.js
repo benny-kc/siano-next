@@ -22,6 +22,7 @@ import { selectedMember } from "./selection.js";
 import { encodeText } from "../vendor/qrcode.js";
 import { loadTrips } from "../store/trips.js";
 import { FONTS, getTypography, SCALE_MIN, SCALE_MAX } from "./typography.js";
+import { fullscreenPreferred } from "./fullscreen.js";
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -338,6 +339,12 @@ function appearanceSection(actions) {
     el("button", { type: "button", class: "toggle", "aria-pressed": String(t.bold), onclick: () => actions.toggleBold() }, t.bold ? "On" : "Off"),
   );
 
+  const fs = fullscreenPreferred();
+  const fullscreen = el("div", { class: "appear-row" },
+    el("span", { class: "lbl" }, "Full screen"),
+    el("button", { type: "button", class: "toggle", "aria-pressed": String(fs), onclick: () => actions.toggleFullscreen() }, fs ? "On" : "Off"),
+  );
+
   const fonts = el("div", { class: "font-pills" },
     ...FONTS.map((f) =>
       el("button", {
@@ -349,7 +356,7 @@ function appearanceSection(actions) {
 
   return el("section", {},
     el("h3", {}, "Appearance"),
-    size, bold, fonts,
+    size, bold, fullscreen, fonts,
     el("button", { type: "button", class: "btn-block", onclick: () => actions.resetAppearance() }, "↺ Reset appearance"),
   );
 }
