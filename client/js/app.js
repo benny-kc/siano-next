@@ -88,6 +88,29 @@ async function main() {
     return { x: Math.round(c.x - 160) + jitter(), y: Math.round(c.y - 60) + jitter() };
   }
 
+  // Add a traveller to a meal, defaulting the payer to the FIRST person added so
+  // a meal is never left without someone who paid (matches the reference:
+  // payer_id || first participant). Tapping another avatar still moves the payer.
+  function addPerson(mealId, memberId) {
+    const meal = log.snapshot().meals.find((m) => m.id === mealId);
+    log.emit((c) => ops.addParticipant(c, mealId, memberId));
+    if (meal && meal.payerId == null) {
+      const firstParticipant = meal.participantIds[0] ?? memberId;
+      log.emit((c) => ops.setPayer(c, mealId, firstParticipant));
+    }
+  }
+
+  // Remove a traveller from a meal; if they were the payer, hand the payer role
+  // to whoever remains (nil only when the meal is now empty).
+  function removePerson(mealId, memberId) {
+    const meal = log.snapshot().meals.find((m) => m.id === mealId);
+    log.emit((c) => ops.removeParticipant(c, mealId, memberId));
+    if (meal && meal.payerId === memberId) {
+      const next = meal.participantIds.find((id) => id !== memberId) ?? null;
+      log.emit((c) => ops.setPayer(c, mealId, next));
+    }
+  }
+
   const actions = {
     setTripName: (name) => log.emit((c) => ops.setTripName(c, name)),
 
@@ -120,7 +143,7 @@ async function main() {
     },
     setPayer: (id, payerId) => log.emit((c) => ops.setPayer(c, id, payerId)),
     toggleParticipant: (mealId, memberId, add) =>
-      log.emit((c) => (add ? ops.addParticipant(c, mealId, memberId) : ops.removeParticipant(c, mealId, memberId))),
+      add ? addPerson(mealId, memberId) : removePerson(mealId, memberId),
 
     // Inline "exact share" editor: blank clears the lock (back to auto split).
     saveShare: (mealId, memberId, str) => {
@@ -134,13 +157,14 @@ async function main() {
     },
 
     moveMeal: (id, x, y) => log.emit((c) => ops.moveMeal(c, id, x, y)),
-    dropOnMeal: (mealId, memberId) => log.emit((c) => ops.addParticipant(c, mealId, memberId)),
+    dropOnMeal: (mealId, memberId) => addPerson(mealId, memberId),
     dropOnBoard: (memberId, x, y) => {
-      // Two stamped ops: create the meal, then add the traveller to it. Each
-      // advances the clock, so the participant op causally follows the add.
+      // Create the meal, then add the traveller — who becomes its payer (the
+      // meal's first participant). Each op advances the clock, so the participant
+      // + payer ops causally follow the add.
       const id = uid("meal-");
       log.emit((c) => ops.addMeal(c, id, { name: "", emoji: pick(EMOJIS), x, y, open: true }));
-      log.emit((c) => ops.addParticipant(c, id, memberId));
+      addPerson(id, memberId);
     },
 
     // Bills-drawer per-viewer UI state (toggle off when tapping the active one).
