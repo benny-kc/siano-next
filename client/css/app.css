@@ -1462,11 +1462,6 @@ button {
 .report-body h3 {
   color: var(--amber-300);
 }
-.report-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 0.75rem;
-}
 .csv-btn {
   display: inline-flex;
   align-items: center;

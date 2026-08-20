@@ -138,7 +138,10 @@
     <aside id="report" class="drawer drawer--report">
       <div class="drawer-head">
         <h2>📊 Report</h2>
-        <button class="round-btn" data-siano-report-close aria-label="Close report">✕</button>
+        <div class="tools">
+          <button id="report-csv" class="csv-btn" type="button" title="Download CSV backup">⬇ CSV</button>
+          <button class="round-btn" data-siano-report-close aria-label="Close report">✕</button>
+        </div>
       </div>
       <div id="report-content" class="report-body"></div>
     </aside>

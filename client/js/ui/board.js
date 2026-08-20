@@ -530,8 +530,6 @@ function renderReport(snap) {
     el("thead", {}, head), el("tbody", {}, ...body), foot);
 
   const kids = [
-    el("div", { class: "report-actions" },
-      el("button", { type: "button", class: "csv-btn", onclick: () => downloadCsv(snap) }, "⬇ CSV backup")),
     el("h3", {}, "Bills — each traveller's share"),
     el("div", { class: "report-scroll" }, table),
   ];
@@ -569,41 +567,102 @@ function renderReport(snap) {
   root.replaceChildren(...kids);
 }
 
-// Build a spreadsheet-friendly CSV of the report and hand it to the browser as a
-// download. Self-contained (a Blob + object URL) — no server round-trip, works
-// offline. The columns mirror the on-screen matrix.
+// Build a spreadsheet-friendly CSV of the whole trip and hand it to the browser
+// as a download. Self-contained (a Blob + object URL) — no server round-trip,
+// works offline. A faithful port of the reference app's `Report.to_csv/2`: four
+// sections (RFC-4180, CRLF) — trip meta · the bills × travellers share matrix
+// with Consumed/Paid/Net summary rows · per-budget balances · suggested
+// settlements — so the file is a real backup, not just the on-screen table.
 function csvCell(v) {
-  const s = String(v ?? "");
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  const s = v == null ? "" : String(v);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+const encodeCsv = (rows) => rows.map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
+
+const money2 = (c) => (c / 100).toFixed(2); // plain decimal, no locale grouping
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+function localStamp(d) {
+  return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}`;
+}
+function tzLabel() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+  } catch {
+    return "local";
+  }
 }
 
-function downloadCsv(snap) {
+export function downloadReportCsv(snap) {
   const rep = snap.report;
   const cols = rep.members;
-  const money2 = (c) => (c / 100).toFixed(2); // plain decimal, no locale grouping
+  const names = cols.map((m) => m.name);
+  const tot = (id, key) => rep.memberTotals[id]?.[key] || 0;
+  const completeCount = rep.bills.length - rep.draftCount;
+  const now = new Date();
+  const netTotal = rep.grandTotalCents - rep.consumedTotalCents;
+
   const rows = [];
-  rows.push(["Bill", "Payer", "Total", ...cols.map((m) => m.name), "Diff"]);
+
+  // 1. Trip meta.
+  rows.push(["Siano trip report"]);
+  rows.push(["Trip", snap.name || ""]);
+  rows.push(["Trip id", snap.id]);
+  rows.push([`Generated (${tzLabel()})`, now.toLocaleString()]);
+  rows.push(["Total", money2(rep.grandTotalCents)]);
+  rows.push(["Bills", String(completeCount)]);
+  rows.push(["Drafts (not counted)", String(rep.draftCount)]);
+  rows.push(["Travellers", String(cols.length)]);
+  rows.push([]);
+
+  // 2. Bills × travellers share matrix + summary rows.
+  rows.push(["Bills — each traveller's share"]);
+  rows.push(["Bill", "Payer", "Status", "Total", ...names, "Assigned", "Unassigned"]);
   for (const b of rep.bills) {
+    const assigned = b.amountCents - b.diffCents; // = sum of shares
     rows.push([
-      (b.emoji ? b.emoji + " " : "") + (b.name || "Untitled") + (b.complete ? "" : " (draft)"),
+      (b.emoji ? b.emoji + " " : "") + (b.name || "Untitled"),
       b.payerName || "",
+      b.complete ? "complete" : "draft",
       money2(b.amountCents),
       ...cols.map((m) => (Object.prototype.hasOwnProperty.call(b.shares, m.id) ? money2(b.shares[m.id]) : "")),
-      b.diffCents === 0 ? "" : money2(b.diffCents),
+      money2(assigned),
+      money2(b.diffCents),
     ]);
   }
-  const tot = (id, key) => rep.memberTotals[id]?.[key] || 0;
-  rows.push(["Consumed", "", money2(rep.consumedTotalCents), ...cols.map((m) => money2(tot(m.id, "shareCents"))), ""]);
-  rows.push(["Paid", "", money2(rep.grandTotalCents), ...cols.map((m) => money2(tot(m.id, "paidCents"))), ""]);
-  rows.push(["Net", "", money2(rep.grandTotalCents - rep.consumedTotalCents), ...cols.map((m) => money2(tot(m.id, "netCents"))), ""]);
+  rows.push(["Consumed (share)", "", "", money2(rep.consumedTotalCents), ...cols.map((m) => money2(tot(m.id, "shareCents"))), "", ""]);
+  rows.push(["Paid", "", "", money2(rep.grandTotalCents), ...cols.map((m) => money2(tot(m.id, "paidCents"))), "", ""]);
+  rows.push(["Net (paid - consumed)", "", "", money2(netTotal), ...cols.map((m) => money2(tot(m.id, "netCents"))), "", ""]);
+  rows.push([]);
 
-  const csv = rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  // 3. Per-budget balances.
+  rows.push(["Balances — per budget"]);
+  rows.push(["Budget", "Members", "Paid", "Consumed", "Balance", "Direction"]);
+  for (const b of snap.budgets) {
+    const paid = b.memberIds.reduce((s, id) => s + tot(id, "paidCents"), 0);
+    const consumed = b.memberIds.reduce((s, id) => s + tot(id, "shareCents"), 0);
+    const dir = b.balanceCents > 0 ? "is owed" : b.balanceCents < 0 ? "owes" : "settled";
+    rows.push([b.name, b.memberNames.join(", "), money2(paid), money2(consumed), money2(b.balanceCents), dir]);
+  }
+  rows.push([]);
+
+  // 4. Suggested settlements.
+  rows.push(["Suggested settlements"]);
+  if (snap.settlements.length === 0) {
+    rows.push(["Everyone is settled up"]);
+  } else {
+    rows.push(["From", "To", "Amount"]);
+    for (const s of snap.settlements) rows.push([s.from, s.to, money2(s.amountCents)]);
+  }
+
+  const blob = new Blob(["﻿" + encodeCsv(rows)], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  const safe = (snap.name || "siano-trip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "siano-trip";
+  const slug = (snap.name || "siano-trip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "siano-trip";
   a.href = url;
-  a.download = `${safe}-report.csv`;
+  a.download = `${slug}-siano-report-${localStamp(now)}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();

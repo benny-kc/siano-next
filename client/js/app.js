@@ -17,7 +17,7 @@ import { openTripStore } from "./store/oplog.js";
 import { SyncClient } from "./sync/client.js";
 import * as ops from "./core/ops.js";
 import { parse } from "./core/money.js";
-import { render, ui } from "./ui/board.js";
+import { render, ui, downloadReportCsv } from "./ui/board.js";
 import { BoardView } from "./ui/boardview.js";
 import { installViewState } from "./ui/viewstate.js";
 import { initInteractions } from "./ui/interactions.js";
@@ -186,6 +186,8 @@ async function main() {
 
   // Top-bar + primary "add meal" button.
   document.getElementById("add-meal").addEventListener("click", actions.addMeal);
+  // Report CSV backup (built from the current snapshot at click time).
+  document.getElementById("report-csv").addEventListener("click", () => downloadReportCsv(log.snapshot()));
 
   // Live sync (optional — the app is fully usable offline).
   const sync = new SyncClient(wsUrl(), log, {
