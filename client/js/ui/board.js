@@ -55,6 +55,21 @@ function el(tag, props = {}, ...kids) {
 }
 
 const signed = (cents) => (cents > 0 ? "+" : "") + format(cents);
+
+// A meal's creation time as "d Mon, HH:MM" in the VIEWER's local wall-clock
+// (e.g. "20 Aug, 14:30") — the same compact format the reference app showed on
+// each card. `createdAt` is unix ms carried on the add op, so every device shows
+// the author's creation moment. Returns null for pre-`createdAt` meals (nothing
+// to show) or a bad value, so the caller can omit the line entirely.
+function fmtCreatedAt(ms) {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return null;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return null;
+  const mon = d.toLocaleString("en-US", { month: "short" });
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${d.getDate()} ${mon}, ${hh}:${mm}`;
+}
 const toneClass = (c) => (c > 0 ? "tone-pos" : c < 0 ? "tone-neg" : "tone-zero");
 
 // Build an inline-SVG QR for a URL so it can be scanned to open the trip on
@@ -168,7 +183,9 @@ function mealCard(meal, snap, actions) {
     el("div", { class: "participants" }, ...rows),
   );
 
+  const created = fmtCreatedAt(meal.createdAt);
   const foot = el("div", { class: "meal-foot" },
+    created ? el("span", { class: "meal-time", title: "When this bill was created" }, created) : null,
     el("button", {
       type: "button", class: "delete", title: "Delete bill", "aria-label": `Delete ${meal.name}`,
       dataset: { confirm: `Delete “${meal.name || "this bill"}” permanently? This removes its cost from everyone's balance.`, confirmAction: `deleteMeal:${meal.id}` },

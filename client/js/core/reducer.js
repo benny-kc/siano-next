@@ -200,6 +200,12 @@ export function fold(tripId, ops) {
     if (!orSetPresent(m.events)) continue;
     presentMealIds.push(id);
 
+    // Creation time = the FIRST add op's wall-clock stamp (unix ms). minByOrder
+    // is deterministic across devices, so a concurrent re-add (after a remove)
+    // never changes the original "created" time. Null for pre-`createdAt` ops.
+    const firstAdd = minByOrder(m.adds);
+    const createdAt = typeof firstAdd.createdAt === "number" ? firstAdd.createdAt : null;
+
     const name = resolveScalar([...m.adds, ...m.name], (o) => o.name)?.value;
     const emoji = resolveScalar([...m.adds, ...m.emoji], (o) => o.emoji)?.value;
     const amountRes = resolveScalar(m.amount, (o) => o.cents);
@@ -256,6 +262,7 @@ export function fold(tripId, ops) {
       id,
       name: name ?? "",
       emoji: emoji ?? null,
+      createdAt,
       amountCents: amountRes?.value ?? 0,
       payerId: payer?.value ?? null,
       participantIds,

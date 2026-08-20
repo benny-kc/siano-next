@@ -178,3 +178,36 @@ test("report: per-traveller paid / consumed / net matrix across all bills", () =
   assert.deepEqual(dinner.shares, { m1: 1500, m2: 1500 });
   assert.equal(Object.prototype.hasOwnProperty.call(dinner.shares, "m3"), false);
 });
+
+test("meals carry a creation timestamp from their add op, stable across re-adds", () => {
+  const A = dev("A");
+  const B = dev("B");
+
+  // addMeal auto-stamps a wall-clock createdAt (unix ms).
+  const auto = ops.addMeal(A, "auto", { name: "Lunch" });
+  assert.equal(typeof auto.createdAt, "number", "add_meal stamps createdAt");
+
+  // The reducer surfaces createdAt on the meal (the earliest add's stamp).
+  const state = fold("trip", [ops.addMeal(A, "m1", { name: "Dinner", createdAt: 1_700_000_000_000 })]);
+  assert.equal(state.meals.m1.createdAt, 1_700_000_000_000);
+
+  // A concurrent re-add (after a remove) must NOT change the original created
+  // time — it's taken from the FIRST add by deterministic order, add-wins keeps
+  // the meal, and the timestamp stays the moment it was first made.
+  const firstAdd = ops.addMeal(A, "m2", { name: "Trip snack", createdAt: 1000 });
+  B.observe(firstAdd);
+  const rem = ops.removeMeal(A, "m2");
+  const readd = ops.addMeal(B, "m2", { name: "Trip snack", createdAt: 9999 });
+  A.observe(readd);
+  B.observe(rem);
+  const state2 = fold("trip", [firstAdd, rem, readd]);
+  assert.ok(state2.meals.m2, "add-wins keeps the meal");
+  assert.equal(state2.meals.m2.createdAt, 1000, "created time stays the first add's");
+
+  // It flows through the snapshot the board renders.
+  const snap = buildSnapshot(fold("trip", [
+    ops.addMember(A, "mem", { name: "Ann" }),
+    ops.addMeal(A, "m3", { name: "Coffee", createdAt: 1_712_000_000_000, open: true }),
+  ]));
+  assert.equal(snap.meals.find((m) => m.id === "m3").createdAt, 1_712_000_000_000);
+});

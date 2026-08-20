@@ -58,7 +58,12 @@ export const setMemberName = (c, memberId, name) => makeOp(c, OP.SET_MEMBER_NAME
 export const setMemberBudget = (c, memberId, budgetId) =>
   makeOp(c, OP.SET_MEMBER_BUDGET, { memberId, budgetId });
 
-export const addMeal = (c, mealId, fields = {}) => makeOp(c, OP.ADD_MEAL, { mealId, ...fields });
+// `createdAt` (unix milliseconds, wall-clock at creation) rides on the add op so
+// every device shows the SAME "created" time on the card — the author's clock at
+// the moment the bill was made, carried in the synced op, not each viewer's fold
+// time. Callers may override it (e.g. tests); otherwise it's stamped now.
+export const addMeal = (c, mealId, fields = {}) =>
+  makeOp(c, OP.ADD_MEAL, { mealId, createdAt: Date.now(), ...fields });
 export const removeMeal = (c, mealId) => makeOp(c, OP.REMOVE_MEAL, { mealId });
 export const setMealName = (c, mealId, name) => makeOp(c, OP.SET_MEAL_NAME, { mealId, name });
 export const setMealEmoji = (c, mealId, emoji) => makeOp(c, OP.SET_MEAL_EMOJI, { mealId, emoji });

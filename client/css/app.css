@@ -628,6 +628,11 @@ button {
   min-height: 1.5rem;
   align-items: center;
 }
+.meal-time {
+  font-size: 10px;
+  color: var(--slate-600);
+  font-variant-numeric: tabular-nums;
+}
 .meal-foot .delete {
   margin-left: auto;
   border: none;
