@@ -26,7 +26,8 @@ export const SCALE_MIN = 0.8;
 export const SCALE_MAX = 1.4;
 export const SCALE_STEP = 0.1;
 
-const DEFAULTS = { family: "system", scale: 1, bold: false };
+const THEMES = ["dark", "light"];
+const DEFAULTS = { family: "system", scale: 1, bold: false, theme: "dark" };
 
 const clampScale = (s) => {
   const n = Math.round((Number(s) || 1) * 100) / 100;
@@ -41,6 +42,7 @@ function load() {
         family: FONTS.some((f) => f.id === v.family) ? v.family : DEFAULTS.family,
         scale: clampScale(v.scale),
         bold: !!v.bold,
+        theme: THEMES.includes(v.theme) ? v.theme : DEFAULTS.theme,
       };
     }
   } catch {
@@ -72,6 +74,11 @@ export function applyTypography() {
   root.style.setProperty("--siano-ui-scale", String(state.scale));
   if (state.bold) root.setAttribute("data-siano-bold", "");
   else root.removeAttribute("data-siano-bold");
+  if (state.theme === "light") root.setAttribute("data-siano-theme", "light");
+  else root.removeAttribute("data-siano-theme");
+  // Keep the browser UI (PWA title bar / address bar tint) in step with the theme.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", state.theme === "light" ? "#f3ead3" : "#020617");
 }
 
 export function setFont(id) {
@@ -89,6 +96,13 @@ export function stepScale(delta) {
 
 export function toggleBold() {
   state.bold = !state.bold;
+  persist();
+  applyTypography();
+}
+
+export function setTheme(theme) {
+  if (!THEMES.includes(theme)) return;
+  state.theme = theme;
   persist();
   applyTypography();
 }

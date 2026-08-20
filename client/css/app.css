@@ -36,12 +36,71 @@
   --rose-300: #fda4af;
 
   --board-bg: #0b1220;
+  --board-dot: rgba(148, 163, 184, 0.15);
+
+  /* Ink that sits on a bright accent (avatar/chip/amber button) — stays dark in
+     both themes, so it must NOT be remapped like the page background. */
+  --on-accent: #0b1020;
+
+  /* Semantic surfaces (translucent over the page bg) so the light theme can
+     re-tint them rather than every rule hardcoding a slate rgba. */
+  --card: rgba(30, 41, 59, 0.6);
+  --card-soft: rgba(30, 41, 59, 0.4);
+  --card-strong: rgba(30, 41, 59, 0.85);
+  --card-sticky: rgba(30, 41, 59, 0.96);
+  --panel: rgba(15, 23, 42, 0.96);
+  --panel-soft: rgba(15, 23, 42, 0.4);
+  --hairline: rgba(148, 163, 184, 0.25);
+  --amber-text: rgba(252, 211, 77, 0.8);
 
   /* Per-device typography (set on <html> by js/ui/typography.js). */
   --siano-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --siano-ui-scale: 1;
 
   color-scheme: dark;
+}
+
+/* ── Light theme (warm beige, not stark white) ────────────────────────────────
+   A per-device preference (Settings → Appearance). Set on <html> as
+   data-siano-theme="light" by js/ui/typography.js; it only re-tints the palette
+   tokens, so every component follows automatically. The slate scale inverts in
+   lightness (slate-950 = lightest beige page, slate-100 = darkest ink); amber /
+   emerald / rose darken to stay readable on beige. */
+:root[data-siano-theme="light"] {
+  --slate-950: #f3ead3;
+  --slate-900: #ede2c8;
+  --slate-800: #e6d9ba;
+  --slate-700: #d8c7a0;
+  --slate-600: #b6a578;
+  --slate-500: #8b7c56;
+  --slate-400: #6e6244;
+  --slate-300: #564d38;
+  --slate-200: #403929;
+  --slate-100: #2c2820;
+
+  --amber-500: #d97706;
+  --amber-400: #f59e0b;
+  --amber-300: #b45309;
+  --amber-text: #b45309;
+
+  --emerald-400: #047857;
+  --emerald-300: #059669;
+  --rose-600: #dc2626;
+  --rose-400: #dc2626;
+  --rose-300: #b91c1c;
+
+  --board-bg: #e9ddc0;
+  --board-dot: rgba(120, 95, 50, 0.22);
+
+  --card: rgba(92, 71, 38, 0.1);
+  --card-soft: rgba(92, 71, 38, 0.06);
+  --card-strong: rgba(92, 71, 38, 0.16);
+  --card-sticky: #ede2c8;
+  --panel: #fbf4e3;
+  --panel-soft: rgba(92, 71, 38, 0.06);
+  --hairline: rgba(92, 71, 38, 0.25);
+
+  color-scheme: light;
 }
 
 * {
@@ -171,7 +230,7 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
   border-radius: 999px;
-  background: rgba(30, 41, 59, 0.5);
+  background: var(--card);
   padding: 0.125rem 0.625rem;
   font-size: 0.75rem;
 }
@@ -194,7 +253,7 @@ button {
 .topbar-meta .total {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 600;
-  color: rgba(252, 211, 77, 0.8);
+  color: var(--amber-text);
   font-variant-numeric: tabular-nums;
 }
 .net {
@@ -209,7 +268,7 @@ button {
   color: var(--emerald-400);
 }
 .net--closed {
-  background: rgba(148, 163, 184, 0.15);
+  background: var(--board-dot);
   color: var(--slate-400);
 }
 .net--connecting {
@@ -231,7 +290,7 @@ button {
   place-items: center;
   border: none;
   border-radius: 0.75rem;
-  background: rgba(30, 41, 59, 0.6);
+  background: var(--card);
   color: var(--slate-400);
   transition: background 0.15s, color 0.15s, transform 0.1s;
 }
@@ -245,12 +304,12 @@ button {
 }
 .icon-btn--primary {
   background: var(--amber-500);
-  color: var(--slate-950);
+  color: var(--on-accent);
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
 }
 .icon-btn--primary:hover {
   background: var(--amber-400);
-  color: var(--slate-950);
+  color: var(--on-accent);
 }
 .icon-btn--primary:active {
   transform: scale(0.95);
@@ -307,7 +366,7 @@ button {
   border-radius: 1rem;
   border: 1px solid var(--slate-800);
   background-color: var(--board-bg);
-  background-image: radial-gradient(circle at 1px 1px, rgba(148, 163, 184, 0.15) 1px, transparent 0);
+  background-image: radial-gradient(circle at 1px 1px, var(--board-dot) 1px, transparent 0);
   background-size: 22px 22px;
 }
 .board-empty {
@@ -346,7 +405,7 @@ button {
   -webkit-user-select: none;
   border-radius: 1rem;
   border: 1px solid var(--slate-700);
-  background: rgba(15, 23, 42, 0.95);
+  background: var(--panel);
   padding: 1rem 1rem 0.5rem;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
   transition: box-shadow 0.15s ease, transform 0.15s ease;
@@ -478,7 +537,7 @@ button {
   padding: 0.125rem 0.5rem 0.125rem 0.125rem;
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--slate-950);
+  color: var(--on-accent);
 }
 .pchip .payer-btn {
   display: grid;
@@ -492,7 +551,7 @@ button {
   font-size: 0.75rem;
 }
 .pchip .payer-btn.is-payer {
-  box-shadow: 0 0 0 2px var(--slate-950);
+  box-shadow: 0 0 0 2px var(--on-accent);
 }
 .pchip .pbody {
   display: flex;
@@ -526,11 +585,11 @@ button {
   display: inline;
 }
 .pchip .premove:hover {
-  color: var(--slate-950);
+  color: var(--on-accent);
 }
 .share-edit {
   width: 4rem;
-  border: 1px solid rgba(15, 23, 42, 0.4);
+  border: 1px solid var(--panel-soft);
   border-radius: 0.375rem;
   background: rgba(255, 255, 255, 0.9);
   padding: 0.125rem 0.375rem;
@@ -661,7 +720,7 @@ button {
   height: 6px;
 }
 .dock::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.3);
+  background: var(--hairline);
   border-radius: 999px;
 }
 .dock-empty {
@@ -695,7 +754,7 @@ button {
   border-radius: 999px;
   font-size: 1rem;
   font-weight: 900;
-  color: var(--slate-950);
+  color: var(--on-accent);
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4);
   outline: 2px solid rgba(2, 6, 23, 0.3);
   transition: transform 0.15s;
@@ -971,7 +1030,7 @@ button {
 }
 .card-note {
   border-radius: 0.75rem;
-  background: rgba(30, 41, 59, 0.4);
+  background: var(--card-soft);
   padding: 0.75rem;
   font-size: 0.875rem;
   color: var(--slate-500);
@@ -981,7 +1040,7 @@ button {
 .sort-menu {
   border-radius: 0.75rem;
   border: 1px solid var(--slate-700);
-  background: rgba(30, 41, 59, 0.8);
+  background: var(--card-strong);
   padding: 0.25rem;
   font-size: 0.875rem;
   margin-bottom: 0.75rem;
@@ -1026,7 +1085,7 @@ button {
 }
 .pill.active {
   background: var(--amber-400);
-  color: var(--slate-950);
+  color: var(--on-accent);
 }
 .bills-list {
   list-style: none;
@@ -1048,7 +1107,7 @@ button {
   gap: 0.75rem;
   border: none;
   border-radius: 0.75rem;
-  background: rgba(30, 41, 59, 0.6);
+  background: var(--card);
   padding: 0.5rem 0.75rem;
   text-align: left;
   color: inherit;
@@ -1107,7 +1166,7 @@ button {
   place-items: center;
   border: none;
   border-radius: 0.75rem;
-  background: rgba(30, 41, 59, 0.6);
+  background: var(--card);
   color: var(--slate-500);
   transition: background 0.15s, color 0.15s;
 }
@@ -1128,7 +1187,7 @@ button {
 }
 .member-item {
   border-radius: 0.75rem;
-  background: rgba(30, 41, 59, 0.6);
+  background: var(--card);
   padding: 0.5rem 0.75rem;
 }
 .member-top {
@@ -1145,7 +1204,7 @@ button {
   border-radius: 999px;
   font-size: 0.875rem;
   font-weight: 900;
-  color: var(--slate-950);
+  color: var(--on-accent);
 }
 .member-name-input {
   min-width: 0;
@@ -1194,7 +1253,7 @@ button {
   margin: 0.25rem 0 0;
   padding-left: 0.25rem;
   font-size: 11px;
-  color: rgba(252, 211, 77, 0.8);
+  color: var(--amber-text);
 }
 .add-row {
   margin-top: 0.75rem;
@@ -1253,7 +1312,7 @@ button {
   align-items: center;
   gap: 0.5rem;
   border-radius: 0.75rem;
-  background: rgba(30, 41, 59, 0.6);
+  background: var(--card);
   padding: 0.5rem 0.75rem;
 }
 .budget-item .col {
@@ -1280,7 +1339,7 @@ button {
 }
 .total-card {
   border-radius: 0.75rem;
-  background: rgba(30, 41, 59, 0.6);
+  background: var(--card);
   padding: 1rem;
 }
 .total-card .lbl {
@@ -1304,7 +1363,7 @@ button {
   align-items: center;
   gap: 0.5rem;
   border-radius: 0.75rem;
-  background: rgba(30, 41, 59, 0.6);
+  background: var(--card);
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
 }
@@ -1375,7 +1434,7 @@ button {
   align-items: center;
   gap: 0.5rem;
   border-radius: 0.75rem;
-  background: rgba(30, 41, 59, 0.6);
+  background: var(--card);
   padding: 0.5rem 0.75rem;
 }
 .trip-open {
@@ -1434,7 +1493,7 @@ button {
   justify-content: space-between;
   gap: 0.75rem;
   border-radius: 0.75rem;
-  background: rgba(30, 41, 59, 0.6);
+  background: var(--card);
   padding: 0.5rem 0.75rem;
   margin-bottom: 0.5rem;
 }
@@ -1489,7 +1548,27 @@ button {
 }
 .toggle[aria-pressed="true"] {
   background: var(--amber-400);
-  color: var(--slate-950);
+  color: var(--on-accent);
+}
+.seg {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--slate-800);
+  border-radius: 999px;
+  padding: 0.125rem;
+}
+.seg-btn {
+  border-radius: 999px;
+  background: transparent;
+  color: var(--slate-300);
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  transition: background 0.15s, color 0.15s;
+}
+.seg-btn.active {
+  background: var(--amber-400);
+  color: var(--on-accent);
 }
 .font-pills {
   display: flex;
@@ -1499,7 +1578,7 @@ button {
 }
 .font-pills .pill.active {
   background: var(--amber-400);
-  color: var(--slate-950);
+  color: var(--on-accent);
 }
 .disclaimer {
   user-select: none;
@@ -1520,11 +1599,11 @@ button {
 /* Personal ledger */
 .ledger-pick.is-me {
   background-color: var(--amber-400);
-  color: var(--slate-950);
+  color: var(--on-accent);
 }
 .ledger-block {
   border-radius: 0.75rem;
-  background: rgba(30, 41, 59, 0.6);
+  background: var(--card);
   padding: 1rem;
 }
 .ledger-block .big {
@@ -1633,7 +1712,7 @@ button {
   border: none;
   border-radius: 999px;
   background: var(--amber-400);
-  color: var(--slate-950);
+  color: var(--on-accent);
   padding: 0.375rem 0.875rem;
   font-size: 0.875rem;
   font-weight: 700;
@@ -1668,7 +1747,7 @@ table.report thead th {
   position: sticky;
   top: 0;
   z-index: 2;
-  background: rgba(30, 41, 59, 0.95);
+  background: var(--card-sticky);
   color: var(--slate-300);
   font-weight: 700;
 }
@@ -1684,7 +1763,7 @@ table.report td.name {
 }
 table.report thead th.name {
   z-index: 3;
-  background: rgba(30, 41, 59, 0.98);
+  background: var(--card-sticky);
 }
 table.report tbody td {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1727,7 +1806,7 @@ table.report tfoot th {
 }
 table.report tfoot tr.sum th.name {
   font-family: system-ui, sans-serif;
-  background: rgba(30, 41, 59, 0.85);
+  background: var(--card-strong);
 }
 table.report tfoot tr:first-child td,
 table.report tfoot tr:first-child th {
@@ -1739,7 +1818,7 @@ table.report tfoot tr.net td {
   font-weight: 700;
 }
 table.report tfoot tr.net th.name {
-  background: rgba(30, 41, 59, 0.95);
+  background: var(--card-sticky);
 }
 /* Tone colours win over the defaults for the Net row + diff cells. */
 table.report .tone-pos {
@@ -1835,8 +1914,8 @@ table.report .tone-zero {
   max-width: min(90vw, 24rem);
   padding: 0.75rem 1.25rem;
   border-radius: 0.75rem;
-  background-color: rgba(15, 23, 42, 0.96);
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  background-color: var(--panel);
+  border: 1px solid var(--hairline);
   color: var(--slate-100);
   font-size: 0.875rem;
   font-weight: 600;

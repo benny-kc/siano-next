@@ -325,6 +325,14 @@ function appearanceSection(actions) {
   const t = getTypography();
   const pct = Math.round(t.scale * 100);
 
+  const theme = el("div", { class: "appear-row" },
+    el("span", { class: "lbl" }, "Theme"),
+    el("div", { class: "seg" },
+      el("button", { type: "button", class: "seg-btn" + (t.theme !== "light" ? " active" : ""), "aria-pressed": String(t.theme !== "light"), onclick: () => actions.setTheme("dark") }, "🌙 Dark"),
+      el("button", { type: "button", class: "seg-btn" + (t.theme === "light" ? " active" : ""), "aria-pressed": String(t.theme === "light"), onclick: () => actions.setTheme("light") }, "☀️ Light"),
+    ),
+  );
+
   const size = el("div", { class: "appear-row" },
     el("span", { class: "lbl" }, "Text size"),
     el("div", { class: "size-ctl" },
@@ -356,7 +364,7 @@ function appearanceSection(actions) {
 
   return el("section", {},
     el("h3", {}, "Appearance"),
-    size, bold, fullscreen, fonts,
+    theme, size, bold, fullscreen, fonts,
     el("button", { type: "button", class: "btn-block", onclick: () => actions.resetAppearance() }, "↺ Reset appearance"),
   );
 }

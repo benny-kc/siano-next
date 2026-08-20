@@ -22,7 +22,7 @@ import { render, ui, downloadReportCsv } from "./ui/board.js";
 import { BoardView } from "./ui/boardview.js";
 import { installViewState } from "./ui/viewstate.js";
 import { initInteractions } from "./ui/interactions.js";
-import { applyTypography, setFont, stepScale, toggleBold, resetTypography, SCALE_STEP } from "./ui/typography.js";
+import { applyTypography, setFont, stepScale, toggleBold, setTheme, resetTypography, SCALE_STEP } from "./ui/typography.js";
 import { installFullscreen, fullscreenPreferred, setFullscreenPreferred } from "./ui/fullscreen.js";
 import { dlog, derror } from "./log.js";
 
@@ -189,6 +189,7 @@ async function main() {
     setFont: (id) => { setFont(id); schedulePaint(); },
     stepTextSize: (dir) => { stepScale(dir * SCALE_STEP); schedulePaint(); },
     toggleBold: () => { toggleBold(); schedulePaint(); },
+    setTheme: (t) => { setTheme(t); schedulePaint(); },
     toggleFullscreen: () => { setFullscreenPreferred(!fullscreenPreferred()); schedulePaint(); },
     resetAppearance: () => { resetTypography(); schedulePaint(); },
 
