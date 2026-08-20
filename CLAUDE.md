@@ -130,6 +130,7 @@ Create ops via the `ops.js` constructors (they stamp the clock). Emit them throu
 | `client/js/ui/selection.js` | The "armed" traveller (single-select) shared by the renderer and gestures. |
 | `client/js/ui/interactions.js` | All pointer gestures wired ONCE by delegation on stable containers (survive repaints): pan/zoom, edge-swipe drawers, traveller drag-to-split, meal-card drag, long-press-to-set-share, and the in-page confirm dialog. |
 | `client/index.html`, `css/app.css` | The fixed-viewport shell (top bar / board / dock / drawers / help / confirm) and the full game-like styling — a buildless, plain-CSS port of the reference app's Tailwind + custom look. |
+| `client/js/vendor/qrcode.js` | Dependency-free QR encoder (`encodeText(text) -> {size, modules}`), a condensed port of Nayuki's public-domain library. Renders the trip-share QR in the Settings drawer. |
 | `client/js/app.js` | Entry: wires store + sync + UI; defines `actions`; **rAF-coalesced paint, also deferred while a drag/pan is in flight**. |
 | `client/js/log.js` | Operator-controlled client logging (see Logging). |
 | `client/manifest.webmanifest`, `service-worker.js` | PWA manifest + offline-shell cache (bump `CACHE` + the `SHELL` list when adding a client module). |
@@ -259,9 +260,11 @@ today — keep `core/*` and `ui/*` acyclic (the topo sort depends on it).
   CSS now live under `client/js/ui/*` + `client/{index.html,css/app.css}`
   (buildless, plain-CSS port of the reference's Tailwind look). The Report drawer
   shows the full bills × travellers share matrix with Paid/Consumed/Net totals
-  and a client-side CSV backup (`snapshot.report`, built in `snapshot.js`). What
-  remains from the reference UI: bill **photos/OCR** (next item), the QR share
-  code, and the first-run coach-mark hints.
+  and a client-side CSV backup (`snapshot.report`, built in `snapshot.js`). The
+  Settings drawer shares the trip via a Copy-link button and a scannable **QR
+  code** (self-contained encoder in `client/js/vendor/qrcode.js`). What remains
+  from the reference UI: bill **photos/OCR** (next item) and the first-run
+  coach-mark hints.
 - **Photo/OCR blob channel**: log carries `photoId` + fields; bytes sync
   opportunistically; the OCR service stays server-side (`lib/siano/ocr.ex` in the
   reference).

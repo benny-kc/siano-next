@@ -19,6 +19,7 @@
 
 import { format } from "../core/money.js";
 import { selectedMember } from "./selection.js";
+import { encodeText } from "../vendor/qrcode.js";
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -52,6 +53,36 @@ function el(tag, props = {}, ...kids) {
 
 const signed = (cents) => (cents > 0 ? "+" : "") + format(cents);
 const toneClass = (c) => (c > 0 ? "tone-pos" : c < 0 ? "tone-neg" : "tone-zero");
+
+// Build an inline-SVG QR for a URL so it can be scanned to open the trip on
+// another phone. Self-contained (see js/vendor/qrcode.js), so it works offline
+// in the installed PWA. Memoized by URL — the code only changes per trip.
+let _qr = { url: null, svg: "" };
+function qrSvg(url) {
+  if (_qr.url === url) return _qr.svg;
+  let svg = "";
+  try {
+    const { size, modules } = encodeText(url, "M");
+    const quiet = 4;
+    const dim = size + quiet * 2;
+    let path = "";
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        if (modules[r][c]) path += `M${c + quiet},${r + quiet}h1v1h-1z`;
+      }
+    }
+    svg =
+      `<svg viewBox="0 0 ${dim} ${dim}" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">` +
+      `<rect width="${dim}" height="${dim}" fill="#ffffff"/><path d="${path}" fill="#0f172a"/></svg>`;
+  } catch {
+    svg = "";
+  }
+  _qr = { url, svg };
+  return svg;
+}
+
+// The canonical shareable URL for this trip (matches the "Copy trip link" text).
+const tripUrl = (id) => `${location.origin}/t/${encodeURIComponent(id)}`;
 
 // ── Trash / grip icons as small SVGs ──────────────────────────────────────────
 function trashIcon() {
@@ -400,6 +431,10 @@ function tripNameSection(snap, actions) {
       onchange: (e) => actions.setTripName(e.target.value),
     }),
     el("p", { class: "trip-id-note" }, "Trip ID: ", el("span", { class: "mono" }, snap.id)),
+    el("div", { class: "qr-share" },
+      el("div", { class: "qr-box", html: qrSvg(tripUrl(snap.id)), "aria-label": "Trip QR code" }),
+      el("span", { class: "muted-note" }, "Scan to open this trip on another phone"),
+    ),
     el("div", { class: "admin", style: "margin-top:0.75rem" },
       el("button", { type: "button", class: "btn-block", onclick: () => actions.share() }, "🔗 Copy trip link"),
       el("button", { type: "button", class: "btn-block", onclick: () => actions.newTrip() }, "✨ New trip"),
