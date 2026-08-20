@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Full-bleed amber background: safe for a maskable icon (any mask shape
+       still lands on the brand colour). -->
+  <rect width="512" height="512" fill="#f59e0b"/>
+  <!-- Suitcase, centred well inside the maskable safe zone (~central 80%). -->
+  <g fill="none" stroke="#0f172a" stroke-linecap="round" stroke-linejoin="round">
+    <!-- handle -->
+    <path d="M210 190 v-24 a14 14 0 0 1 14 -14 h64 a14 14 0 0 1 14 14 v24" stroke-width="22"/>
+  </g>
+  <!-- body -->
+  <rect x="146" y="190" width="220" height="176" rx="30" fill="#0f172a"/>
+  <!-- two straps -->
+  <rect x="196" y="190" width="16" height="176" fill="#f59e0b"/>
+  <rect x="300" y="190" width="16" height="176" fill="#f59e0b"/>
+  <!-- clasp -->
+  <rect x="240" y="168" width="32" height="14" rx="5" fill="#0f172a"/>
+</svg>

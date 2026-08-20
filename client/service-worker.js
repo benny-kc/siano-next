@@ -3,12 +3,16 @@
 // Strategy: cache-first for our own GET assets, falling back to the network and
 // caching what it fetches. WebSocket sync traffic is untouched.
 
-const CACHE = "siano-shell-v11";
+const CACHE = "siano-shell-v12";
 const SHELL = [
   "/",
   "/index.html",
   "/css/app.css",
   "/manifest.webmanifest",
+  "/icons/icon.svg",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/apple-touch-icon.png",
   "/js/app.js",
   "/js/log.js",
   "/js/core/money.js",
