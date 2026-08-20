@@ -57,6 +57,16 @@
   --siano-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --siano-ui-scale: 1;
 
+  /* Font-weight control: --siano-weight is an offset (default 0) added to every
+     weight tier below, so the "Font weight" stepper shifts the WHOLE app's text
+     heavier/lighter, not just one toggle. Clamped to real font-weight bounds. */
+  --siano-weight: 0;
+  --fw-normal: clamp(100, calc(400 + var(--siano-weight, 0)), 900);
+  --fw-medium: clamp(100, calc(500 + var(--siano-weight, 0)), 900);
+  --fw-semibold: clamp(100, calc(600 + var(--siano-weight, 0)), 900);
+  --fw-bold: clamp(100, calc(700 + var(--siano-weight, 0)), 900);
+  --fw-black: clamp(100, calc(900 + var(--siano-weight, 0)), 900);
+
   color-scheme: dark;
 }
 
@@ -126,13 +136,9 @@ body {
   color: var(--slate-200);
   font-family: var(--siano-font, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
   font-size: 0.9375rem;
+  font-weight: var(--fw-normal);
   line-height: 1.4;
   -webkit-tap-highlight-color: transparent;
-}
-/* "Bold text": lift only normal-weight (inherited) text to 600 — headings and
-   already-bold elements keep their own weight, so the hierarchy is preserved. */
-:root[data-siano-bold] body {
-  font-weight: 600;
 }
 
 button,
@@ -216,7 +222,7 @@ button {
   align-items: center;
   gap: 0.375rem;
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   letter-spacing: -0.01em;
   color: var(--slate-200);
 }
@@ -244,7 +250,7 @@ button {
   color: var(--slate-500);
 }
 .topbar-meta .count b {
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   color: var(--slate-300);
 }
 .topbar-meta .dot {
@@ -252,7 +258,7 @@ button {
 }
 .topbar-meta .total {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--amber-text);
   font-variant-numeric: tabular-nums;
 }
@@ -441,7 +447,7 @@ button {
   border-radius: 0.375rem;
   background: transparent;
   padding: 0.125rem 0.25rem;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   color: var(--slate-100);
   outline: none;
   transition: border-color 0.15s, background 0.15s;
@@ -536,7 +542,7 @@ button {
   border-radius: 999px;
   padding: 0.125rem 0.5rem 0.125rem 0.125rem;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--on-accent);
 }
 .pchip .payer-btn {
@@ -606,7 +612,7 @@ button {
   padding: 0.25rem 0.625rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: #fff;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
 }
@@ -694,7 +700,7 @@ button {
 }
 .dock-head .lbl {
   font-size: 0.75rem;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--slate-500);
@@ -753,7 +759,7 @@ button {
   place-items: center;
   border-radius: 999px;
   font-size: 1rem;
-  font-weight: 900;
+  font-weight: var(--fw-black);
   color: var(--on-accent);
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4);
   outline: 2px solid rgba(2, 6, 23, 0.3);
@@ -769,7 +775,7 @@ button {
   white-space: nowrap;
   text-align: center;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   line-height: 1.1;
 }
 .token-dim {
@@ -985,7 +991,7 @@ button {
 .drawer-head h2 {
   margin: 0;
   font-size: 1.125rem;
-  font-weight: 900;
+  font-weight: var(--fw-black);
 }
 .drawer-head .tools {
   display: flex;
@@ -1016,7 +1022,7 @@ button {
 .drawer h3 {
   margin: 0 0 0.5rem;
   font-size: 0.75rem;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--slate-400);
@@ -1077,7 +1083,7 @@ button {
   color: var(--slate-300);
   padding: 0.25rem 0.625rem;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   transition: background 0.15s, color 0.15s;
 }
 .pill:hover {
@@ -1130,7 +1136,7 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 .bill-open .bmeta {
   overflow: hidden;
@@ -1147,7 +1153,7 @@ button {
 }
 .bill-open .amt .money {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   color: var(--amber-300);
 }
 .bill-open .amt .state {
@@ -1203,7 +1209,7 @@ button {
   place-items: center;
   border-radius: 999px;
   font-size: 0.875rem;
-  font-weight: 900;
+  font-weight: var(--fw-black);
   color: var(--on-accent);
 }
 .member-name-input {
@@ -1212,7 +1218,7 @@ button {
   border: none;
   background: transparent;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--slate-100);
   outline: none;
 }
@@ -1285,7 +1291,7 @@ button {
   color: var(--slate-200);
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   transition: background 0.15s;
 }
 .btn:hover {
@@ -1301,7 +1307,7 @@ button {
   background: var(--slate-800);
   padding: 0.75rem 1rem;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--slate-200);
 }
 .btn-block:hover {
@@ -1326,7 +1332,7 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 .tone-pos {
   color: var(--emerald-400);
@@ -1351,7 +1357,7 @@ button {
 .total-card .big {
   margin: 0.25rem 0 0;
   font-size: 1.875rem;
-  font-weight: 900;
+  font-weight: var(--fw-black);
   color: var(--amber-300);
 }
 .total-card .sub {
@@ -1368,11 +1374,11 @@ button {
   font-size: 0.875rem;
 }
 .settle-item .from {
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--rose-300);
 }
 .settle-item .to {
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--emerald-300);
 }
 .settle-item .arrow {
@@ -1381,7 +1387,7 @@ button {
 .settle-item .money {
   margin-left: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   color: var(--slate-100);
 }
 .trip-id-note {
@@ -1456,7 +1462,7 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--slate-100);
 }
 .trip-open .nm.current {
@@ -1499,7 +1505,7 @@ button {
 }
 .appear-row .lbl {
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--slate-200);
 }
 .size-ctl {
@@ -1515,7 +1521,7 @@ button {
   border-radius: 0.5rem;
   background: var(--slate-800);
   color: var(--slate-200);
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   transition: background 0.15s;
 }
 .size-btn:hover:not(:disabled) {
@@ -1543,7 +1549,7 @@ button {
   color: var(--slate-300);
   padding: 0.375rem 0.875rem;
   font-size: 0.8rem;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   transition: background 0.15s, color 0.15s;
 }
 .toggle[aria-pressed="true"] {
@@ -1563,7 +1569,7 @@ button {
   color: var(--slate-300);
   padding: 0.3rem 0.7rem;
   font-size: 0.8rem;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   transition: background 0.15s, color 0.15s;
 }
 .seg-btn.active {
@@ -1590,7 +1596,7 @@ button {
 }
 .disclaimer .hd {
   margin: 0 0 0.25rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--slate-500);
@@ -1609,7 +1615,7 @@ button {
 .ledger-block .big {
   margin: 0.25rem 0 0;
   font-size: 1.5rem;
-  font-weight: 900;
+  font-weight: var(--fw-black);
 }
 .ledger-block ul {
   list-style: none;
@@ -1656,7 +1662,7 @@ button {
 .help-head h2 {
   margin: 0;
   font-size: 1rem;
-  font-weight: 900;
+  font-weight: var(--fw-black);
   letter-spacing: -0.01em;
 }
 .help-body {
@@ -1671,7 +1677,7 @@ button {
 }
 .help-body h3 {
   margin: 0 0 0.375rem;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   color: var(--amber-300);
   text-transform: none;
   letter-spacing: 0;
@@ -1715,7 +1721,7 @@ button {
   color: var(--on-accent);
   padding: 0.375rem 0.875rem;
   font-size: 0.875rem;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   transition: background 0.15s;
 }
 .csv-btn:hover {
@@ -1749,7 +1755,7 @@ table.report thead th {
   z-index: 2;
   background: var(--card-sticky);
   color: var(--slate-300);
-  font-weight: 700;
+  font-weight: var(--fw-bold);
 }
 /* The Bill column is pinned to the left so shares scroll under it. */
 table.report th.name,
@@ -1759,7 +1765,7 @@ table.report td.name {
   text-align: left;
   background: var(--slate-900);
   z-index: 1;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 table.report thead th.name {
   z-index: 3;
@@ -1774,7 +1780,7 @@ table.report tbody td.left {
   color: var(--slate-400);
 }
 table.report td.amt {
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--amber-300);
 }
 table.report .rep-dash {
@@ -1802,7 +1808,7 @@ table.report tfoot {
 table.report tfoot td,
 table.report tfoot th {
   color: var(--slate-300);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 table.report tfoot tr.sum th.name {
   font-family: system-ui, sans-serif;
@@ -1815,7 +1821,7 @@ table.report tfoot tr:first-child th {
 table.report tfoot tr.net th,
 table.report tfoot tr.net td {
   color: var(--slate-100);
-  font-weight: 700;
+  font-weight: var(--fw-bold);
 }
 table.report tfoot tr.net th.name {
   background: var(--card-sticky);
@@ -1887,7 +1893,7 @@ table.report .tone-zero {
   color: var(--slate-200);
   padding: 0.5rem 1rem;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 .confirm-no:hover {
   background: var(--slate-700);
@@ -1899,7 +1905,7 @@ table.report .tone-zero {
   color: #fff;
   padding: 0.5rem 1rem;
   font-size: 0.875rem;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
 }
 .confirm-yes:hover {
   background: #f43f5e;
@@ -1918,7 +1924,7 @@ table.report .tone-zero {
   border: 1px solid var(--hairline);
   color: var(--slate-100);
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   line-height: 1.3;
   text-align: center;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);

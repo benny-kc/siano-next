@@ -7,7 +7,10 @@
 //
 //   --siano-font        the chosen font-family stack (body inherits it)
 //   --siano-ui-scale    a multiplier on the root font-size (rem-based UI scales)
-//   data-siano-bold     present when "Bold text" is on (normal-weight text -> 600)
+//   --siano-weight      an offset added to every font-weight tier (the "Font
+//                       weight" stepper), so text across the whole app gets
+//                       lighter/heavier — see the --fw-* tokens in app.css
+//   data-siano-theme    "light" for the warm-beige theme (absent = dark)
 //
 // Fonts are SYSTEM stacks only — the app is offline-first behind a tight CSP, so
 // no web fonts are loaded. The five options render distinctly on every device.
@@ -26,12 +29,23 @@ export const SCALE_MIN = 0.8;
 export const SCALE_MAX = 1.4;
 export const SCALE_STEP = 0.1;
 
+// Weight is stored as an offset added to every tier (0 = the app's defaults),
+// so the stepper shifts the whole scale. Bounds keep the lightest tier readable
+// and the heaviest tier within real font-weight range.
+export const WEIGHT_MIN = -200;
+export const WEIGHT_MAX = 300;
+export const WEIGHT_STEP = 100;
+
 const THEMES = ["dark", "light"];
-const DEFAULTS = { family: "system", scale: 1, bold: false, theme: "dark" };
+const DEFAULTS = { family: "system", scale: 1, weight: 0, theme: "dark" };
 
 const clampScale = (s) => {
   const n = Math.round((Number(s) || 1) * 100) / 100;
   return Math.min(SCALE_MAX, Math.max(SCALE_MIN, n));
+};
+const clampWeight = (w) => {
+  const n = Math.round((Number(w) || 0) / WEIGHT_STEP) * WEIGHT_STEP;
+  return Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN, n));
 };
 
 function load() {
@@ -41,7 +55,8 @@ function load() {
       return {
         family: FONTS.some((f) => f.id === v.family) ? v.family : DEFAULTS.family,
         scale: clampScale(v.scale),
-        bold: !!v.bold,
+        // Back-compat: an old { bold: true } pref maps to a heavier offset.
+        weight: v.weight != null ? clampWeight(v.weight) : v.bold ? 200 : 0,
         theme: THEMES.includes(v.theme) ? v.theme : DEFAULTS.theme,
       };
     }
@@ -72,8 +87,7 @@ export function applyTypography() {
   const font = (FONTS.find((f) => f.id === state.family) || FONTS[0]).stack;
   root.style.setProperty("--siano-font", font);
   root.style.setProperty("--siano-ui-scale", String(state.scale));
-  if (state.bold) root.setAttribute("data-siano-bold", "");
-  else root.removeAttribute("data-siano-bold");
+  root.style.setProperty("--siano-weight", String(state.weight));
   if (state.theme === "light") root.setAttribute("data-siano-theme", "light");
   else root.removeAttribute("data-siano-theme");
   // Keep the browser UI (PWA title bar / address bar tint) in step with the theme.
@@ -94,8 +108,8 @@ export function stepScale(delta) {
   applyTypography();
 }
 
-export function toggleBold() {
-  state.bold = !state.bold;
+export function stepWeight(delta) {
+  state.weight = clampWeight(state.weight + delta);
   persist();
   applyTypography();
 }

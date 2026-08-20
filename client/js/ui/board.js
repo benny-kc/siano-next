@@ -21,7 +21,7 @@ import { format } from "../core/money.js";
 import { selectedMember } from "./selection.js";
 import { encodeText } from "../vendor/qrcode.js";
 import { loadTrips } from "../store/trips.js";
-import { FONTS, getTypography, SCALE_MIN, SCALE_MAX } from "./typography.js";
+import { FONTS, getTypography, SCALE_MIN, SCALE_MAX, WEIGHT_MIN, WEIGHT_MAX } from "./typography.js";
 import { fullscreenPreferred } from "./fullscreen.js";
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
@@ -342,9 +342,13 @@ function appearanceSection(actions) {
     ),
   );
 
-  const bold = el("div", { class: "appear-row" },
-    el("span", { class: "lbl" }, "Bold text"),
-    el("button", { type: "button", class: "toggle", "aria-pressed": String(t.bold), onclick: () => actions.toggleBold() }, t.bold ? "On" : "Off"),
+  const weight = el("div", { class: "appear-row" },
+    el("span", { class: "lbl" }, "Font weight"),
+    el("div", { class: "size-ctl" },
+      el("button", { type: "button", class: "size-btn", title: "Lighter", "aria-label": "Lighter text", disabled: t.weight <= WEIGHT_MIN, onclick: () => actions.stepWeight(-1) }, el("span", { class: "sm", style: "font-weight:400" }, "B")),
+      el("span", { class: "size-val" }, String(400 + t.weight)),
+      el("button", { type: "button", class: "size-btn", title: "Bolder", "aria-label": "Bolder text", disabled: t.weight >= WEIGHT_MAX, onclick: () => actions.stepWeight(1) }, el("span", { class: "lg", style: "font-weight:900" }, "B")),
+    ),
   );
 
   const fs = fullscreenPreferred();
@@ -364,7 +368,7 @@ function appearanceSection(actions) {
 
   return el("section", {},
     el("h3", {}, "Appearance"),
-    theme, size, bold, fullscreen, fonts,
+    theme, size, weight, fullscreen, fonts,
     el("button", { type: "button", class: "btn-block", onclick: () => actions.resetAppearance() }, "↺ Reset appearance"),
   );
 }
