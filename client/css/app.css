@@ -695,6 +695,44 @@ button {
   flex-shrink: 0;
   flex-direction: column;
 }
+/* Transient "+ add all" shortcut — deliberately understated: it sits above the
+   dock, blends into the background (no fill), and reads as a hint, not a CTA.
+   Only present in the DOM while active, so :empty collapses the row entirely. */
+.quick-actions {
+  display: flex;
+  justify-content: center;
+  padding: 0 0.25rem;
+}
+.quick-actions:empty {
+  display: none;
+}
+.quick-add-all {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0 0 0.35rem;
+  padding: 0.18rem 0.7rem;
+  border: 1px solid var(--slate-700);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--slate-400);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(3px);
+  animation: quick-add-in 0.25s ease-out forwards;
+  transition: color 0.15s, border-color 0.15s;
+}
+.quick-add-all:hover,
+.quick-add-all:active {
+  color: var(--slate-200);
+  border-color: var(--slate-500);
+}
+@keyframes quick-add-in {
+  to { opacity: 1; transform: translateY(0); }
+}
 .dock-head {
   display: flex;
   user-select: none;

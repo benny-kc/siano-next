@@ -30,6 +30,7 @@ export const ui = {
   billsSort: "created_asc",
   editingShare: null, // "mealId:memberId" while a share is being typed
   ledgerMember: null, // which traveller the personal ledger is showing
+  quickAddMealId: null, // meal awaiting a transient "+ add all" (set by app.js)
 };
 
 // ── DOM helper ────────────────────────────────────────────────────────────────
@@ -213,6 +214,29 @@ function conflictNote(conflicts) {
     }
   }
   return el("div", { class: "conflict", title: "Two people set this at once — pick one." }, "⚠ " + bits.join("; "));
+}
+
+// ── Transient quick-actions row (above the dock) ──────────────────────────────
+// A deliberately subtle "+ add all" shortcut that app.js arms for a few seconds
+// right after a meal is created by dragging one traveller onto the board. It
+// pulls every remaining traveller into that fresh meal in one tap. Shown only
+// while `ui.quickAddMealId` points at a still-open meal that is missing someone.
+function renderQuickActions(snap, actions) {
+  const host = document.getElementById("quick-actions");
+  if (!host) return;
+  const mealId = ui.quickAddMealId;
+  const meal = mealId != null ? snap.meals.find((m) => m.id === mealId) : null;
+  const missing = meal
+    ? snap.members.filter((mm) => !meal.participants.some((p) => p.id === mm.id))
+    : [];
+  if (!meal || missing.length === 0) { host.replaceChildren(); return; }
+  host.replaceChildren(
+    el("button", {
+      type: "button", class: "quick-add-all",
+      title: "Add every traveller to this new meal",
+      onclick: () => actions.quickAddAll(mealId),
+    }, "+ add all"),
+  );
 }
 
 // ── Dock ────────────────────────────────────────────────────────────────────
@@ -809,6 +833,7 @@ export function render(snap, actions) {
       : [el("p", { class: "dock-empty" }, "No travellers yet — add some in ⚙️ Settings.")]),
   );
 
+  renderQuickActions(snap, actions);
   renderBills(snap, actions);
   renderMenu(snap, actions);
   renderReport(snap);

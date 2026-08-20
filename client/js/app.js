@@ -177,6 +177,22 @@ async function main() {
       const id = uid("meal-");
       log.emit((c) => ops.addMeal(c, id, { name: "", emoji: pick(EMOJIS), x, y, open: true }));
       addPerson(id, memberId);
+      // Offer a brief "+ add all" so the creator can pull the whole group into
+      // this fresh meal in one tap. Only worth it when others exist to add.
+      if (log.snapshot().members.length > 1) armQuickAddAll(id);
+    },
+
+    // The transient "+ add all" shortcut: add every remaining traveller to the
+    // just-created meal, then dismiss the shortcut. (Existing participants and
+    // the payer are left untouched — addPerson only sets a payer when none yet.)
+    quickAddAll: (mealId) => {
+      const snap = log.snapshot();
+      const meal = snap.meals.find((m) => m.id === mealId);
+      if (meal) {
+        const have = new Set(meal.participantIds);
+        for (const m of snap.members) if (!have.has(m.id)) addPerson(mealId, m.id);
+      }
+      disarmQuickAddAll();
     },
 
     // Bills-drawer per-viewer UI state (toggle off when tapping the active one).
@@ -233,6 +249,24 @@ async function main() {
       painting = false;
       paint();
     });
+  }
+
+  // ── Transient "+ add all" shortcut ─────────────────────────────────────────
+  // Armed for a few seconds when a meal is created by dragging one traveller
+  // onto the board; the button (rendered above the dock) pulls everyone else
+  // into that fresh meal in one tap. If ignored it just fades away on timeout.
+  const QUICK_ADD_MS = 6000;
+  let quickAddTimer = null;
+  function armQuickAddAll(mealId) {
+    clearTimeout(quickAddTimer);
+    ui.quickAddMealId = mealId;
+    schedulePaint();
+    quickAddTimer = setTimeout(disarmQuickAddAll, QUICK_ADD_MS);
+  }
+  function disarmQuickAddAll() {
+    clearTimeout(quickAddTimer);
+    quickAddTimer = null;
+    if (ui.quickAddMealId != null) { ui.quickAddMealId = null; schedulePaint(); }
   }
 
   interactions = initInteractions({ actions, schedulePaint });
