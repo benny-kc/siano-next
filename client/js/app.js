@@ -24,6 +24,7 @@ import { installViewState, View } from "./ui/viewstate.js";
 import { initInteractions } from "./ui/interactions.js";
 import { applyTypography, setFont, stepScale, stepWeight, setTheme, resetTypography, SCALE_STEP, WEIGHT_STEP } from "./ui/typography.js";
 import { installFullscreen, fullscreenPreferred, setFullscreenPreferred } from "./ui/fullscreen.js";
+import { initInstall, promptInstall } from "./ui/install.js";
 import { dlog, derror } from "./log.js";
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
@@ -214,6 +215,13 @@ async function main() {
     toggleFullscreen: () => { setFullscreenPreferred(!fullscreenPreferred()); schedulePaint(); },
     resetAppearance: () => { resetTypography(); schedulePaint(); },
 
+    // PWA install: replay Chromium's captured prompt (must run from this click).
+    // The section repaints itself via initInstall's hook when the state changes.
+    installApp: async () => {
+      const outcome = await promptInstall();
+      if (outcome === "accepted") toast("Installing Siano…");
+    },
+
     // "Your trips" switcher (device-local list).
     openTrip: (id) => { if (id && id !== tripId) location.assign(`/t/${encodeURIComponent(id)}`); },
     shareTripLink: async (id) => {
@@ -270,6 +278,10 @@ async function main() {
   }
 
   interactions = initInteractions({ actions, schedulePaint });
+
+  // Repaint the Settings "Install app" section when the browser hands us a
+  // beforeinstallprompt (or the app gets installed) while the drawer is open.
+  initInstall(schedulePaint);
 
   log.subscribe(schedulePaint);
   paint();

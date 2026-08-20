@@ -23,6 +23,7 @@ import { encodeText } from "../vendor/qrcode.js";
 import { loadTrips } from "../store/trips.js";
 import { FONTS, getTypography, SCALE_MIN, SCALE_MAX, WEIGHT_MIN, WEIGHT_MAX } from "./typography.js";
 import { fullscreenPreferred } from "./fullscreen.js";
+import { installState } from "./install.js";
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -346,17 +347,65 @@ function billRow(bill, actions) {
 // ── Settings drawer contents ──────────────────────────────────────────────────
 function renderMenu(snap, actions) {
   const root = document.getElementById("menu-content");
+  // installSection may return null (already installed, or nothing to offer) —
+  // filter it out so replaceChildren never gets a null (which the DOM would
+  // stringify to the literal "null"). See the CLAUDE.md replaceChildren note.
   root.replaceChildren(
-    travellersSection(snap, actions),
-    budgetsSection(snap),
-    totalSection(snap),
-    settleSection(snap),
-    ledgerSection(snap, actions),
-    tripNameSection(snap, actions),
-    tripsSection(snap, actions),
-    appearanceSection(actions),
-    helpSection(),
-    disclaimerSection(),
+    ...[
+      installSection(actions),
+      travellersSection(snap, actions),
+      budgetsSection(snap),
+      totalSection(snap),
+      settleSection(snap),
+      ledgerSection(snap, actions),
+      tripNameSection(snap, actions),
+      tripsSection(snap, actions),
+      appearanceSection(actions),
+      helpSection(),
+      disclaimerSection(),
+    ].filter(Boolean),
+  );
+}
+
+// The iOS "Share" glyph as inline SVG (SF Symbols don't render in web content).
+const IOS_SHARE_SVG =
+  '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M12 3v11"/><path d="M8.5 6.5 12 3l3.5 3.5"/>' +
+  '<path d="M7 10H5.5A1.5 1.5 0 0 0 4 11.5V19A1.5 1.5 0 0 0 5.5 20.5h13A1.5 1.5 0 0 0 20 19v-7.5A1.5 1.5 0 0 0 18.5 10H17"/>' +
+  '</svg>';
+
+// Install prompt at the very top of the drawer. Hidden when we're already an
+// installed app; a real "Install" button on Android/Chromium (replays the
+// captured beforeinstallprompt); manual Add-to-Home-Screen steps on iOS Safari
+// (which has no prompt API). See ui/install.js for the detection.
+function installSection(actions) {
+  const state = installState();
+  if (state === "standalone" || state === "none") return null;
+
+  if (state === "ios") {
+    return el("section", { class: "install-card" },
+      el("h3", {}, "📲 Install Siano"),
+      el("p", { class: "install-note" },
+        "Add Siano to your Home Screen for a full-screen, offline-ready app:",
+      ),
+      el("ol", { class: "install-steps" },
+        el("li", {}, "Tap the ", el("strong", {}, "Share"), " icon ",
+          el("span", { class: "ios-share", "aria-hidden": "true", html: IOS_SHARE_SVG }), " in the toolbar."),
+        el("li", {}, "Choose ", el("strong", {}, "Add to Home Screen"), "."),
+        el("li", {}, "Tap ", el("strong", {}, "Add"), " — Siano appears on your Home Screen."),
+      ),
+    );
+  }
+
+  // "installable" — Chromium (Android / desktop) handed us a prompt to replay.
+  return el("section", { class: "install-card" },
+    el("h3", {}, "📲 Install Siano"),
+    el("p", { class: "install-note" },
+      "Install Siano as an app — full-screen, offline-ready, one tap from your Home Screen.",
+    ),
+    el("button", { type: "button", class: "btn-block install-btn", onclick: () => actions.installApp() },
+      "⬇️ Install app"),
   );
 }
 

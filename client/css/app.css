@@ -1641,6 +1641,47 @@ button {
   color: var(--slate-500);
 }
 
+/* Install-app section (top of Settings drawer) — a gently highlighted card so
+   the invite to install stands out from the plain sections without shouting. */
+.install-card {
+  border: 1px solid var(--hairline);
+  border-radius: 0.85rem;
+  background: var(--card);
+  padding: 0.85rem 0.9rem;
+}
+.install-note {
+  margin: 0 0 0.7rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--slate-300);
+}
+.install-steps {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--slate-300);
+}
+.install-steps strong {
+  color: var(--slate-100);
+  font-weight: var(--fw-semibold);
+}
+.install-steps .ios-share {
+  display: inline-flex;
+  vertical-align: -0.22em;
+  color: var(--amber-400);
+}
+.install-btn {
+  background: var(--amber-500);
+  color: var(--on-accent);
+}
+.install-btn:hover {
+  background: var(--amber-400);
+}
+
 /* Personal ledger */
 .ledger-pick.is-me {
   background-color: var(--amber-400);
