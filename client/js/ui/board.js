@@ -451,7 +451,7 @@ function helpSection() {
 function disclaimerSection() {
   return el("div", { class: "disclaimer" },
     el("p", { class: "hd" }, "Disclaimer"),
-    el("p", {}, "Siano is provided for informational and convenience purposes only, with no warranty of any kind. It can make mistakes in its calculations, so figures here are estimates — not a financial record. Always verify amounts before settling up."),
+    el("p", {}, "Siano is provided for informational and convenience purposes only, with no warranty of any kind. It may contain bugs and can make mistakes in its calculations, splitting and tracking, so figures shown here are estimates — not a financial record. Always verify amounts yourselves before settling up. The author accepts no responsibility or liability for any errors, losses or disputes arising from use of this application. By using it you agree you do so at your own risk."),
   );
 }
 
