@@ -20,7 +20,7 @@ import * as ops from "./core/ops.js";
 import { parse } from "./core/money.js";
 import { render, ui, downloadReportCsv } from "./ui/board.js";
 import { BoardView } from "./ui/boardview.js";
-import { installViewState } from "./ui/viewstate.js";
+import { installViewState, View } from "./ui/viewstate.js";
 import { initInteractions } from "./ui/interactions.js";
 import { applyTypography, setFont, stepScale, stepWeight, setTheme, resetTypography, SCALE_STEP, WEIGHT_STEP } from "./ui/typography.js";
 import { installFullscreen, fullscreenPreferred, setFullscreenPreferred } from "./ui/fullscreen.js";
@@ -141,6 +141,11 @@ async function main() {
     closeMeal: (id) => log.emit((c) => ops.setOpen(c, id, false)),
     openMeal: (id) => {
       log.emit((c) => ops.setOpen(c, id, true));
+      // Tapping a bill in the drawer puts its card on the board: get out of the
+      // way (close the Bills drawer) and pan the board to the card the user
+      // pointed at. panToMeal measures on the next frame, and the drawer is a
+      // fixed overlay that doesn't shift board layout, so closing it here is safe.
+      View.closeDrawer();
       if (interactions) interactions.panToMeal(id);
     },
     setAmountStr: (id, str) => {
