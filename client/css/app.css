@@ -1857,6 +1857,12 @@ table.report .tone-zero {
   justify-content: center;
   padding: 1.5rem;
   opacity: 0;
+  /* Restore interactivity: the critical inline CSS in index.html defaults
+     #confirm-modal to `pointer-events: none` (so the hidden overlay never
+     eats taps). When shown (`.hidden` removed) it must capture clicks, or the
+     Yes/No taps fall through to the board beneath and fire the wrong action.
+     Hidden state is handled by `.hidden { display: none }` below. */
+  pointer-events: auto;
   transition: opacity 0.2s;
 }
 #confirm-modal.hidden {
