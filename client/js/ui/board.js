@@ -235,7 +235,7 @@ function renderQuickActions(snap, actions) {
       type: "button", class: "quick-add-all",
       title: "Add every traveller to this new meal",
       onclick: () => actions.quickAddAll(mealId),
-    }, "+ add all"),
+    }, "(+ add all)"),
   );
 }
 
