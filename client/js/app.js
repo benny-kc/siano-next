@@ -22,6 +22,7 @@ import { render, ui, downloadReportCsv } from "./ui/board.js";
 import { BoardView } from "./ui/boardview.js";
 import { installViewState } from "./ui/viewstate.js";
 import { initInteractions } from "./ui/interactions.js";
+import { applyTypography, setFont, stepScale, toggleBold, resetTypography, SCALE_STEP } from "./ui/typography.js";
 import { dlog, derror } from "./log.js";
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
@@ -73,6 +74,7 @@ async function main() {
   const surface = document.getElementById("board-surface");
 
   installViewState();
+  applyTypography(); // restore this device's font/size/boldness before first paint
 
   let interactions; // set after init (below); openMeal needs its panToMeal
 
@@ -180,6 +182,12 @@ async function main() {
       catch { toast(location.href); }
     },
     newTrip: () => { location.assign(`/t/${uid("trip-")}`); },
+
+    // Appearance (per-device typography; applied live, persisted locally).
+    setFont: (id) => { setFont(id); schedulePaint(); },
+    stepTextSize: (dir) => { stepScale(dir * SCALE_STEP); schedulePaint(); },
+    toggleBold: () => { toggleBold(); schedulePaint(); },
+    resetAppearance: () => { resetTypography(); schedulePaint(); },
 
     // "Your trips" switcher (device-local list).
     openTrip: (id) => { if (id && id !== tripId) location.assign(`/t/${encodeURIComponent(id)}`); },

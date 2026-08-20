@@ -37,6 +37,10 @@
 
   --board-bg: #0b1220;
 
+  /* Per-device typography (set on <html> by js/ui/typography.js). */
+  --siano-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --siano-ui-scale: 1;
+
   color-scheme: dark;
 }
 
@@ -52,10 +56,24 @@ body {
   margin: 0;
   overflow: hidden;
   overscroll-behavior: none;
+}
+/* Root font-size drives the whole rem-based UI, so the text-size control scales
+   everything proportionally. */
+html {
+  font-size: calc(100% * var(--siano-ui-scale, 1));
+}
+body {
   background: var(--slate-950);
   color: var(--slate-200);
-  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--siano-font, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  font-size: 0.9375rem;
+  line-height: 1.4;
   -webkit-tap-highlight-color: transparent;
+}
+/* "Bold text": lift only normal-weight (inherited) text to 600 — headings and
+   already-bold elements keep their own weight, so the hierarchy is preserved. */
+:root[data-siano-bold] body {
+  font-weight: 600;
 }
 
 button,
@@ -1407,6 +1425,81 @@ button {
 }
 .trip-icon-btn.remove:hover {
   color: var(--rose-400);
+}
+
+/* Appearance (per-device typography) */
+.appear-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-radius: 0.75rem;
+  background: rgba(30, 41, 59, 0.6);
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.appear-row .lbl {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--slate-200);
+}
+.size-ctl {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.size-btn {
+  display: grid;
+  height: 2rem;
+  width: 2rem;
+  place-items: center;
+  border-radius: 0.5rem;
+  background: var(--slate-800);
+  color: var(--slate-200);
+  font-weight: 700;
+  transition: background 0.15s;
+}
+.size-btn:hover:not(:disabled) {
+  background: var(--slate-700);
+}
+.size-btn:disabled {
+  opacity: 0.4;
+}
+.size-btn .sm {
+  font-size: 0.7rem;
+}
+.size-btn .lg {
+  font-size: 1.05rem;
+}
+.size-val {
+  min-width: 3rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  color: var(--slate-400);
+}
+.toggle {
+  border-radius: 999px;
+  background: var(--slate-800);
+  color: var(--slate-300);
+  padding: 0.375rem 0.875rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  transition: background 0.15s, color 0.15s;
+}
+.toggle[aria-pressed="true"] {
+  background: var(--amber-400);
+  color: var(--slate-950);
+}
+.font-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-bottom: 0.5rem;
+}
+.font-pills .pill.active {
+  background: var(--amber-400);
+  color: var(--slate-950);
 }
 .disclaimer {
   user-select: none;

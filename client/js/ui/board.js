@@ -21,6 +21,7 @@ import { format } from "../core/money.js";
 import { selectedMember } from "./selection.js";
 import { encodeText } from "../vendor/qrcode.js";
 import { loadTrips } from "../store/trips.js";
+import { FONTS, getTypography, SCALE_MIN, SCALE_MAX } from "./typography.js";
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -311,8 +312,45 @@ function renderMenu(snap, actions) {
     ledgerSection(snap, actions),
     tripNameSection(snap, actions),
     tripsSection(snap, actions),
+    appearanceSection(actions),
     helpSection(),
     disclaimerSection(),
+  );
+}
+
+// Appearance — per-device typography (font, size, boldness). Client-only,
+// applied live via CSS vars on <html> (see ui/typography.js); nothing synced.
+function appearanceSection(actions) {
+  const t = getTypography();
+  const pct = Math.round(t.scale * 100);
+
+  const size = el("div", { class: "appear-row" },
+    el("span", { class: "lbl" }, "Text size"),
+    el("div", { class: "size-ctl" },
+      el("button", { type: "button", class: "size-btn", title: "Smaller", "aria-label": "Smaller text", disabled: t.scale <= SCALE_MIN + 1e-9, onclick: () => actions.stepTextSize(-1) }, el("span", { class: "sm" }, "A")),
+      el("span", { class: "size-val" }, `${pct}%`),
+      el("button", { type: "button", class: "size-btn", title: "Larger", "aria-label": "Larger text", disabled: t.scale >= SCALE_MAX - 1e-9, onclick: () => actions.stepTextSize(1) }, el("span", { class: "lg" }, "A")),
+    ),
+  );
+
+  const bold = el("div", { class: "appear-row" },
+    el("span", { class: "lbl" }, "Bold text"),
+    el("button", { type: "button", class: "toggle", "aria-pressed": String(t.bold), onclick: () => actions.toggleBold() }, t.bold ? "On" : "Off"),
+  );
+
+  const fonts = el("div", { class: "font-pills" },
+    ...FONTS.map((f) =>
+      el("button", {
+        type: "button", class: "pill" + (f.id === t.family ? " active" : ""),
+        style: `font-family:${f.stack}`, "aria-pressed": String(f.id === t.family),
+        onclick: () => actions.setFont(f.id),
+      }, f.label)),
+  );
+
+  return el("section", {},
+    el("h3", {}, "Appearance"),
+    size, bold, fonts,
+    el("button", { type: "button", class: "btn-block", onclick: () => actions.resetAppearance() }, "↺ Reset appearance"),
   );
 }
 

@@ -129,6 +129,7 @@ Create ops via the `ops.js` constructors (they stamp the clock). Emit them throu
 | `client/js/ui/boardview.js` | `BoardView` — pan/zoom kept as CSS vars on `:root` (a repaint never resets the view) + screen↔canvas math. |
 | `client/js/ui/viewstate.js` | `View` — the drawers / help / report / sort-popover open state, kept as data-attrs on `:root` (survives repaints), plus system-Back integration. |
 | `client/js/ui/selection.js` | The "armed" traveller (single-select) shared by the renderer and gestures. |
+| `client/js/ui/typography.js` | Per-device font/size/boldness preference (localStorage `siano:type`), applied as CSS vars + `data-siano-bold` on `<html>`. Powers the Settings "Appearance" section. System-font stacks only (offline/CSP-safe). |
 | `client/js/ui/interactions.js` | All pointer gestures wired ONCE by delegation on stable containers (survive repaints): pan/zoom, edge-swipe drawers, traveller drag-to-split, meal-card drag, long-press-to-set-share, and the in-page confirm dialog. |
 | `client/index.html`, `css/app.css` | The fixed-viewport shell (top bar / board / dock / drawers / help / confirm) and the full game-like styling — a buildless, plain-CSS port of the reference app's Tailwind + custom look. |
 | `client/js/vendor/qrcode.js` | Dependency-free QR encoder (`encodeText(text) -> {size, modules}`), a condensed port of Nayuki's public-domain library. Renders the trip-share QR in the Settings drawer. |
