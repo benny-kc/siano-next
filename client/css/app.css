@@ -1196,6 +1196,11 @@ button {
 .text-input:focus {
   border-color: var(--amber-400);
 }
+/* Standalone (not in a flex row) — fill the drawer width like the buttons/cards. */
+.text-input--full {
+  display: block;
+  width: 100%;
+}
 .btn {
   border: none;
   border-radius: 0.5rem;

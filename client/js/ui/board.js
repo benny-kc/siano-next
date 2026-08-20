@@ -426,7 +426,7 @@ function tripNameSection(snap, actions) {
   return el("section", {},
     el("h3", {}, "Trip name"),
     el("input", {
-      class: "text-input", value: snap.name, placeholder: "Name this trip…", "aria-label": "Trip name", autocomplete: "off",
+      class: "text-input text-input--full", value: snap.name, placeholder: "Name this trip…", "aria-label": "Trip name", autocomplete: "off",
       onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } },
       onchange: (e) => actions.setTripName(e.target.value),
     }),
