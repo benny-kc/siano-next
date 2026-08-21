@@ -12,6 +12,19 @@ import { resolveBudgets, buildBudgets } from "./budgets.js";
 const lockedShares = (meal) => meal.lockedShares || {};
 const photosOf = (meal) => meal.photos || [];
 
+// Avatar initials, DERIVED from the current name so renaming a traveller (in
+// Settings or on a chip) updates their avatar immediately. The `initials` stamped
+// on the add_member op is only a fallback for when the name is blank — deriving
+// here means the stored value never goes stale after a set_member_name. One or
+// two uppercase letters; "" when the name is blank (callers fall back to the
+// stored initials, then "?"). Mirrors the reference app's avatar initials.
+export function initialsFor(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 /** Only meals that represent real spending contribute to the ledger. */
 function expensesFromMeals(state) {
   return state.mealOrder
@@ -61,7 +74,7 @@ function decorateMeal(meal, state) {
       id: m.id,
       name: m.name,
       color: m.color,
-      initials: m.initials,
+      initials: initialsFor(m.name) || m.initials,
       isPayer: meal.payerId === mid,
       shareCents: shares[mid] || 0,
       locked: Object.prototype.hasOwnProperty.call(locks, mid),
@@ -219,6 +232,7 @@ export function buildSnapshot(state) {
       .filter(([id]) => id !== member.id);
     return {
       ...member,
+      initials: initialsFor(member.name) || member.initials,
       budgetId: bid,
       balanceCents: budgetBalances[bid] || 0,
       budgetName: budgetNames[bid],

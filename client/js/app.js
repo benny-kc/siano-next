@@ -18,6 +18,7 @@ import { lastTripId, rememberTrip, forgetTrip, loadTrips } from "./store/trips.j
 import { SyncClient } from "./sync/client.js";
 import * as ops from "./core/ops.js";
 import { parse } from "./core/money.js";
+import { initialsFor } from "./core/snapshot.js";
 import { render, ui, downloadReportCsv } from "./ui/board.js";
 import { BoardView } from "./ui/boardview.js";
 import { installViewState, View } from "./ui/viewstate.js";
@@ -33,13 +34,6 @@ const EMOJIS = ["🍽️", "🍕", "🍔", "🍜", "🍣", "🥘", "🍰", "🍺
 const uid = (p) =>
   (globalThis.crypto?.randomUUID ? crypto.randomUUID() : p + Math.random().toString(36).slice(2, 10));
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-
-function initials(name) {
-  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
 
 // Trip id lives in the URL as /t/<id>; mint one if absent so a fresh visit is a
 // shareable trip immediately. Returns `{ id, minted }` — `minted` is true only
@@ -139,7 +133,7 @@ async function main() {
       const n = log.snapshot().members.length;
       const nm = (name && name.trim()) || `Traveller ${n + 1}`;
       const id = uid("m-");
-      log.emit((c) => ops.addMember(c, id, { name: nm, color: PALETTE[n % PALETTE.length], initials: initials(nm) }));
+      log.emit((c) => ops.addMember(c, id, { name: nm, color: PALETTE[n % PALETTE.length], initials: initialsFor(nm) || "?" }));
     },
     setMemberName: (id, name) => log.emit((c) => ops.setMemberName(c, id, name)),
     removeMember: (id) => log.emit((c) => ops.removeMember(c, id)),
