@@ -131,12 +131,14 @@ Create ops via the `ops.js` constructors (they stamp the clock). Emit them throu
 | `client/js/ui/selection.js` | The "armed" traveller (single-select) shared by the renderer and gestures. |
 | `client/js/ui/typography.js` | Per-device Appearance preferences (localStorage `siano:type`): font family, text size, **font weight** and **light/dark theme**, applied as CSS vars (`--siano-font`/`--siano-ui-scale`/`--siano-weight`) + `data-siano-theme` on `<html>` (also syncs the `theme-color` meta). The weight is an offset added to every `--fw-*` tier in `css/app.css`, so the stepper shifts the whole app's text heavier/lighter (not one bold toggle). System-font stacks only (offline/CSP-safe). The light theme is a warm-beige palette defined once as token overrides under `:root[data-siano-theme="light"]`. |
 | `client/js/ui/fullscreen.js` | Optional "always full-screen" preference (localStorage `siano:fullscreen`, default off). When on, re-enters full-screen on any gesture (browsers only allow it from a user gesture); when off, the app is a normal page. Toggle lives in the Settings "Appearance" section. |
+| `client/js/ui/install.js` | PWA install detection for the Settings "Install app" section. Captures `beforeinstallprompt`/`appinstalled` **at import time** (the one-shot event fires before the drawer opens), exposes `installState()` (`standalone`/`installable`/`ios`/`none`), `promptInstall()` (replays the stashed prompt — must run from a click), and `initInstall(repaint)`. There is **no way to force-install from a tab**: Chromium only lets you replay its captured prompt from a user gesture; iOS Safari has no API (manual "Add to Home Screen" only); desktop Firefox has neither. |
 | `client/js/ui/interactions.js` | All pointer gestures wired ONCE by delegation on stable containers (survive repaints): pan/zoom, edge-swipe drawers, traveller drag-to-split, meal-card drag, long-press-to-set-share, and the in-page confirm dialog. |
 | `client/index.html`, `css/app.css` | The fixed-viewport shell (top bar / board / dock / drawers / help / confirm) and the full game-like styling — a buildless, plain-CSS port of the reference app's Tailwind + custom look. |
 | `client/js/vendor/qrcode.js` | Dependency-free QR encoder (`encodeText(text) -> {size, modules}`), a condensed port of Nayuki's public-domain library. Renders the trip-share QR in the Settings drawer. |
 | `client/js/app.js` | Entry: wires store + sync + UI; defines `actions`; **rAF-coalesced paint, also deferred while a drag/pan is in flight**. |
 | `client/js/log.js` | Operator-controlled client logging (see Logging). |
-| `client/manifest.webmanifest`, `service-worker.js` | PWA manifest + offline-shell cache (bump `CACHE` + the `SHELL` list when adding a client module). |
+| `client/manifest.webmanifest`, `service-worker.js` | PWA manifest + offline-shell cache (bump `CACHE` + the `SHELL` list when adding a client module — see the caching gotcha). |
+| `client/icons/*` | Home-screen / install icons. `icon.svg` is the source; the PNGs (`icon-192`, `icon-512`, `apple-touch-icon`) are **rendered from it** and must be **fully-opaque, full-bleed amber** — a maskable icon with any transparent/white margin shows white borders once the launcher masks it. This env has no `rsvg`/`inkscape`; render with a throwaway `cairosvg` + `PIL` script (`pip install cairosvg pillow`), flattening onto amber and saving RGB. Keep the briefcase inside the maskable safe zone (~central 80%). |
 
 **Hub (dependency-free Node relay):**
 | Path | What |
@@ -230,10 +232,15 @@ today — keep `core/*` and `ui/*` acyclic (the topo sort depends on it).
   handler** — replacing the board's children mid-blur races the browser's focus
   teardown and throws. `app.js` coalesces paints into `requestAnimationFrame`.
   Keep it that way (or move to targeted DOM updates).
-- **Adding a new client module means updating the service worker**: add it to the
-  `SHELL` list AND bump the `CACHE` version in `client/service-worker.js`, or
-  installed PWAs keep serving the old cached shell (cache-first) / 404 the new
-  import. (SW is currently `v3`.)
+- **The service worker is cache-first over the `SHELL`, so ANY shell edit needs a
+  `CACHE` bump** in `client/service-worker.js` (`siano-shell-v<N>` — monotonic).
+  Editing a cached file (`app.css`, any `SHELL` `.js`, `index.html`, an icon) with
+  no bump → installed PWAs keep serving the old cached copy and never see the fix.
+  Adding a **new** module additionally means adding its path to the `SHELL` list
+  (and a `modulepreload` in `index.html`), or the install 404s the new import.
+  When in doubt after touching anything under `client/`, bump the version. This
+  bites hardest on installed PWAs (a plain browser tab revalidates via `ETag`);
+  the last visible bug of "my change didn't ship" is almost always a missed bump.
 - **`/env.js` must stay non-cached** (server `no-store`) so the debug flag is
   always live. The service worker serves it **network-first with a short timeout
   and a safe offline fallback** (`window.__SIANO_DEBUG__=false`) — never caching
@@ -255,7 +262,18 @@ today — keep `core/*` and `ui/*` acyclic (the topo sort depends on it).
   real drag/pan suppress the drawer edge-swipe.
 - When calling `element.replaceChildren(...)` directly (not via the `el()` helper,
   which filters them), **never pass a `null`/`false` child** — the DOM coerces it
-  to the literal text `"null"`. Filter first (this bit the dock once).
+  to the literal text `"null"`. Filter first (this bit the dock once — and again
+  when `installSection()` returns `null` for an already-installed PWA, so
+  `renderMenu` `.filter(Boolean)`s its section list).
+- **The critical inline CSS in `index.html` defaults the modals to
+  `pointer-events: none`** (so a hidden `#help-modal`/`#confirm-modal` never eats
+  taps). A modal shown by JS MUST restore `pointer-events: auto` in `app.css`, or
+  it renders on top but every tap falls straight through to the board beneath —
+  buttons look present but "click the thing under them". `#help-modal` restores it
+  via `:root[data-siano-help]`; `#confirm-modal` (toggled by `.hidden`) sets it on
+  the base rule. This showed up as "the delete-trip Yes/No buttons do nothing" in
+  the installed PWA. Any new overlay defaulted to `pointer-events:none` needs the
+  same restore.
 
 ---
 
