@@ -138,6 +138,7 @@ Create ops via the `ops.js` constructors (they stamp the clock). Emit them throu
 | `client/js/app.js` | Entry: wires store + sync + UI; defines `actions`; **rAF-coalesced paint, also deferred while a drag/pan is in flight**. |
 | `client/js/log.js` | Operator-controlled client logging (see Logging). |
 | `client/manifest.webmanifest`, `service-worker.js` | PWA manifest + offline-shell cache (bump `CACHE` + the `SHELL` list when adding a client module — see the caching gotcha). |
+| `client/sw-register.js` | Registers the service worker from the `<head>` (loaded `async`). Kept as a **separate same-origin file, never inline** — the CSP is `script-src 'self'` with no `'unsafe-inline'`/hash, so an inline block is refused and the SW would never install (no offline shell, on iOS **and** Android). Guarded by a test (`security.test.mjs`, "no inline `<script>`"). |
 | `client/icons/*` | Home-screen / install icons. `icon.svg` is the source; the PNGs (`icon-192`, `icon-512`, `apple-touch-icon`) are **rendered from it** and must be **fully-opaque, full-bleed amber** — a maskable icon with any transparent/white margin shows white borders once the launcher masks it. This env has no `rsvg`/`inkscape`; render with a throwaway `cairosvg` + `PIL` script (`pip install cairosvg pillow`), flattening onto amber and saving RGB. Keep the briefcase inside the maskable safe zone (~central 80%). |
 
 **Hub (dependency-free Node relay):**
@@ -276,6 +277,43 @@ today — keep `core/*` and `ui/*` acyclic (the topo sort depends on it).
   same restore.
 
 ---
+
+## iOS / iPhone (Safari + WebKit) parity — checked, don't reintroduce
+
+The app is developed/tested on Android; these are the WebKit-specific traps that
+make a gesture or field "work on Android, break on iPhone". All are fixed —
+keep them fixed.
+
+- **No inline `<script>` anywhere.** The CSP is `script-src 'self'` with no
+  `'unsafe-inline'` and no hash, so WebKit (and Chromium) silently **refuse**
+  any inline script body. This once blocked the SW-registration block →
+  the service worker never installed → the installed PWA had **no offline
+  shell** (iOS *and* Android). Registration now lives in `client/sw-register.js`
+  (external, `async`). Guarded by `security.test.mjs`.
+- **`-webkit-user-select` on form fields.** An ancestor with
+  `-webkit-user-select: none` (e.g. `.meal-card`, so cards don't select while
+  dragging) is inherited by inline `<input>`s, and iOS Safari then refuses to
+  place a caret or accept typing — the amount/rename/exact-share fields silently
+  became uneditable on iPhone. `app.css` restores `-webkit-user-select: text` on
+  `input, textarea`. Don't drop it.
+- **`-webkit-touch-callout: none` on long-press targets.** The press-and-hold
+  (`.pchip .pbody`, 450 ms) fights iOS's native selection magnifier/callout
+  unless BOTH the prefixed `-webkit-user-select: none` and
+  `-webkit-touch-callout: none` are set (unprefixed alone is a no-op on iOS).
+- **`gesture*` events on the board.** iOS fires proprietary
+  `gesturestart`/`change`/`end` for a pinch and can page-zoom on them even with
+  `touch-action: none`; `interactions.js` `preventDefault`s them on the board
+  surface so a pinch drives our zoom, not the browser's.
+- **CSV export.** iOS Safari ignores `<a download>` for blob URLs (it navigates
+  the tab / drops a PWA out of the app), so `downloadReportCsv` routes through
+  the Web Share API on iOS and keeps the plain download elsewhere.
+- **PWA install** is manual on iOS (no `beforeinstallprompt`); `install.js`
+  detects iOS and shows Add-to-Home-Screen instructions. The apple-prefixed
+  `<meta>`s in `index.html` set standalone mode + status-bar style.
+- **Can't run WebKit in this env** (Playwright's WebKit download is proxy-blocked;
+  only Chromium is present), so a browser smoke test here validates the *code
+  path* under an emulated iPhone but NOT WebKit's rendering — the fixes above are
+  from WebKit's documented behaviour and still want a real-device pass.
 
 ## Roadmap / known gaps (good next tasks)
 

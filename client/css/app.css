@@ -148,6 +148,17 @@ textarea {
   font: inherit;
   color: inherit;
 }
+/* iOS Safari: an ancestor with `-webkit-user-select: none` (e.g. .meal-card,
+   set so cards don't select while dragging) is INHERITED by the inline inputs
+   inside it, and WebKit then refuses to place a caret or accept typing in them
+   — so "tap the amount and type", "tap the title to rename" and the exact-share
+   editor all silently fail on iPhone while working on Android. Explicitly
+   restore text selection on every form field so they stay editable everywhere. */
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
 button {
   cursor: pointer;
   border: none; /* no stray UA button outline; components add their own border */
@@ -562,7 +573,15 @@ button {
 .pchip .pbody {
   display: flex;
   cursor: pointer;
+  /* This is the long-press-to-set-exact-share target (450ms hold, see
+     interactions.js wireLongPress). On iOS the unprefixed `user-select: none`
+     is not enough: without the `-webkit-` prefix AND `-webkit-touch-callout`,
+     Safari fires its native text-selection magnifier / callout menu on the hold
+     and hijacks the gesture — so the share editor never opens on iPhone though
+     it does on Android. The prefixed pair suppresses that native behaviour. */
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
   align-items: center;
   gap: 0.25rem;
 }

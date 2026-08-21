@@ -117,6 +117,33 @@ test("static responses carry security headers", async (t) => {
   assert.equal(res.headers["x-frame-options"], "DENY");
 });
 
+test("index.html has no inline <script> that the tight CSP would refuse", async (t) => {
+  // Regression: the CSP is `script-src 'self'` with NO 'unsafe-inline' and NO
+  // hash, so ANY inline <script> body is silently refused by the browser. The
+  // service-worker registration used to live inline in <head> and was blocked —
+  // the SW never installed and the PWA (Android + iOS) had no offline shell.
+  // Every <script> must therefore be external (`src=…`) or empty. If a hash or
+  // nonce is ever added to script-src, relax this to allow inline again.
+  const { port } = await startHub(t);
+  const body = await new Promise((resolve) =>
+    http.get({ host: "127.0.0.1", port, path: "/" }, (r) => {
+      let b = ""; r.setEncoding("utf8"); r.on("data", (c) => (b += c)); r.on("end", () => resolve(b));
+    }));
+
+  // Strip HTML comments first — prose in a comment may mention "<script>".
+  const html = body.replace(/<!--[\s\S]*?-->/g, "");
+  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
+  assert.ok(scripts.length > 0, "index.html should have at least one <script> tag");
+  for (const [, attrs, inner] of scripts) {
+    const hasSrc = /\bsrc\s*=/.test(attrs);
+    const hasBody = inner.trim() !== "";
+    assert.ok(
+      hasSrc || !hasBody,
+      `inline <script> body found (\"${inner.trim().slice(0, 40)}…\") — CSP script-src 'self' will refuse it; move it to an external same-origin file`,
+    );
+  }
+});
+
 test("static responses are revalidated (no-cache + ETag), so a CDN never pins a stale shell", async (t) => {
   const { port } = await startHub(t);
   const head = (path, headers = {}) =>

@@ -7,6 +7,15 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
     />
     <meta name="theme-color" content="#020617" />
+    <!-- iOS "Add to Home Screen": run chrome-free in standalone mode (the manifest
+         covers modern iOS, but these apple-prefixed hints are what older iOS reads,
+         and status-bar-style still comes only from here). `default` keeps the
+         status bar legible over BOTH the dark and the light theme; the topbar
+         already reserves env(safe-area-inset-top) so nothing hides under it. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Siano" />
     <title>Siano</title>
     <link rel="icon" href="data:," />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
@@ -160,25 +169,17 @@
 
     <link rel="stylesheet" href="/css/app.css" />
 
-    <script>
-      // Register the service worker as early as possible (not at the end of
-      // app.js) so a first visit on a flaky link still installs the offline
-      // shell before the user gives up — making the next visit usable at zero
-      // coverage. `updateViaCache:"none"` stops the browser HTTP cache from
-      // pinning the SW script; the one-time reload when a NEW worker takes
-      // control (guarded against the first install) swaps the page onto the
-      // fresh shell. The hub also serves the SW `no-cache` (see hub/server.js).
-      if ("serviceWorker" in navigator) {
-        var hadController = !!navigator.serviceWorker.controller;
-        var reloading = false;
-        navigator.serviceWorker.addEventListener("controllerchange", function () {
-          if (reloading || !hadController) return; // first install -> no reload
-          reloading = true;
-          location.reload();
-        });
-        navigator.serviceWorker.register("/service-worker.js", { updateViaCache: "none" }).catch(function () {});
-      }
-    </script>
+    <!--
+      Register the service worker as early as possible (not at the end of
+      app.js) so a first visit on a flaky link still installs the offline shell
+      before the user gives up — making the next visit usable at zero coverage.
+      This MUST be an external same-origin file, never an inline <script>: the
+      CSP is `script-src 'self'` (no 'unsafe-inline', no hash), which refuses an
+      inline block — the symptom was the SW never registering at all, so the PWA
+      (incl. iOS "Add to Home Screen") had no offline support. Loaded `async` so
+      it doesn't block first paint. See client/sw-register.js.
+    -->
+    <script src="/sw-register.js" async></script>
   </head>
   <body>
     <!--

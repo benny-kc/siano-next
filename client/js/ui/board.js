@@ -779,7 +779,14 @@ function tzLabel() {
   }
 }
 
-export function downloadReportCsv(snap) {
+// iOS (incl. iPadOS 13+, which reports as a Mac with a touch screen). Kept local
+// so board.js has no import dependency just for a UA sniff.
+function isIOS() {
+  const ua = navigator.userAgent || "";
+  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1);
+}
+
+export async function downloadReportCsv(snap) {
   const rep = snap.report;
   const cols = rep.members;
   const names = cols.map((m) => m.name);
@@ -842,11 +849,30 @@ export function downloadReportCsv(snap) {
   }
 
   const blob = new Blob(["﻿" + encodeCsv(rows)], { type: "text/csv;charset=utf-8" });
+  const slug = (snap.name || "siano-trip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "siano-trip";
+  const filename = `${slug}-siano-report-${localStamp(now)}.csv`;
+
+  // iOS Safari ignores the `<a download>` attribute for blob URLs — instead of
+  // saving the file it navigates the tab to the blob (and in an installed PWA
+  // that drops the user out of the app). So on iOS route the CSV through the
+  // Web Share API (iOS 15+), which lets them save it to Files / send it on.
+  // Everywhere else (Android, desktop) keep the plain download that works.
+  if (isIOS() && typeof navigator.canShare === "function") {
+    let file = null;
+    try { file = new File([blob], filename, { type: "text/csv" }); } catch { /* no File ctor */ }
+    if (file && navigator.canShare({ files: [file] })) {
+      // File sharing is supported: commit to it. A cancel (AbortError) is a
+      // deliberate user choice, not a failure — swallow it and return either
+      // way, rather than falling through to the download that iOS mishandles.
+      try { await navigator.share({ files: [file], title: filename }); } catch { /* cancelled */ }
+      return;
+    }
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  const slug = (snap.name || "siano-trip").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "siano-trip";
   a.href = url;
-  a.download = `${slug}-siano-report-${localStamp(now)}.csv`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();

@@ -198,6 +198,16 @@ function wirePanZoom(surface) {
     }
   }, { passive: false });
 
+  // iOS Safari fires proprietary gesture* events for a pinch and can still zoom
+  // the whole PAGE on them even though the surface is `touch-action: none` and
+  // we preventDefault the two-finger touchmove (Android/Chrome has no such
+  // events, so this only matters on iPhone). Swallow them on the board so a
+  // pinch drives OUR zoom (touchmove handler) and never the browser's page zoom.
+  // Scoped to the surface so a pinch over a drawer still behaves normally.
+  ["gesturestart", "gesturechange", "gestureend"].forEach((type) =>
+    surface.addEventListener(type, (e) => e.preventDefault(), { passive: false }),
+  );
+
   const endTouch = (e) => {
     if (e.touches.length < 2) { two = null; window.__sianoPanning = false; }
     if (e.touches.length === 1) { const t = e.touches[0]; one = { x: t.clientX, y: t.clientY }; }
