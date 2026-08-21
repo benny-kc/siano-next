@@ -139,7 +139,7 @@
         transform: translateX(-100%);
       }
       .drawer--menu { transform: translateX(100%); }
-      #help-modal, #confirm-modal { position: fixed; inset: 0; z-index: 65; opacity: 0; pointer-events: none; }
+      #help-modal, #confirm-modal, #onboard-modal { position: fixed; inset: 0; z-index: 65; opacity: 0; pointer-events: none; }
       #bills-sort-menu { display: none; }
       .hidden { display: none !important; }
     </style>
@@ -161,6 +161,7 @@
     <link rel="modulepreload" href="/js/ui/typography.js" />
     <link rel="modulepreload" href="/js/ui/fullscreen.js" />
     <link rel="modulepreload" href="/js/ui/install.js" />
+    <link rel="modulepreload" href="/js/ui/onboarding.js" />
     <link rel="modulepreload" href="/js/ui/viewstate.js" />
     <link rel="modulepreload" href="/js/ui/boardview.js" />
     <link rel="modulepreload" href="/js/ui/board.js" />
@@ -378,6 +379,54 @@
             Everything here is also learnable by tapping around — nothing destructive happens without a
             confirmation. Come back any time via ⚙️ Settings → ❓.
           </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─────────── First-run welcome / onboarding ───────────
+         Shown once on a genuinely fresh device (no trip, nothing stored). It
+         seeds the trip name + a few travellers in one go. Static shell here,
+         hidden by `.hidden` so it never flashes on first paint; the dynamic
+         traveller rows and wiring live in js/ui/onboarding.js. -->
+    <div id="onboard-modal" class="hidden">
+      <div class="onboard-backdrop"></div>
+      <div class="onboard-panel" role="dialog" aria-modal="true" aria-labelledby="onboard-title">
+        <div class="onboard-head">
+          <div class="onboard-badge" aria-hidden="true">🧳</div>
+          <h2 id="onboard-title">Welcome to Siano!</h2>
+          <p class="onboard-lede">
+            First time here? Start by naming your trip and the fellow travellers
+            coming along — like this. You can change any of it later.
+          </p>
+        </div>
+        <div class="onboard-body">
+          <label class="onboard-field">
+            <span class="onboard-label">Trip name</span>
+            <input
+              id="onboard-trip"
+              type="search"
+              class="onboard-input"
+              placeholder="e.g. Italy 2026"
+              aria-label="Trip name"
+              autocomplete="off"
+              autocorrect="off"
+              spellcheck="false"
+              autocapitalize="words"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
+            />
+          </label>
+          <div class="onboard-field">
+            <span class="onboard-label">Travellers</span>
+            <!-- Traveller name rows are inserted here by onboarding.js. -->
+            <div id="onboard-people" class="onboard-people"></div>
+            <button type="button" id="onboard-add" class="onboard-add">＋ Add another traveller</button>
+          </div>
+        </div>
+        <div class="onboard-actions">
+          <button type="button" id="onboard-later" class="onboard-later">Later</button>
+          <button type="button" id="onboard-done" class="onboard-done">Done</button>
         </div>
       </div>
     </div>

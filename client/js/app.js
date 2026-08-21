@@ -14,7 +14,7 @@
 // (pan/zoom) and ui/viewstate.js (drawer state).
 
 import { openTripStore } from "./store/oplog.js";
-import { lastTripId, rememberTrip, forgetTrip } from "./store/trips.js";
+import { lastTripId, rememberTrip, forgetTrip, loadTrips } from "./store/trips.js";
 import { SyncClient } from "./sync/client.js";
 import * as ops from "./core/ops.js";
 import { parse } from "./core/money.js";
@@ -25,6 +25,7 @@ import { initInteractions } from "./ui/interactions.js";
 import { applyTypography, setFont, stepScale, stepWeight, setTheme, resetTypography, SCALE_STEP, WEIGHT_STEP } from "./ui/typography.js";
 import { installFullscreen, fullscreenPreferred, setFullscreenPreferred } from "./ui/fullscreen.js";
 import { initInstall, promptInstall } from "./ui/install.js";
+import { showOnboarding } from "./ui/onboarding.js";
 import { dlog, derror } from "./log.js";
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
@@ -41,15 +42,20 @@ function initials(name) {
 }
 
 // Trip id lives in the URL as /t/<id>; mint one if absent so a fresh visit is a
-// shareable trip immediately.
+// shareable trip immediately. Returns `{ id, minted }` — `minted` is true only
+// when we generated a brand-new id (a bare "/" visit with no trip in the URL and
+// no remembered trip to resume), which is what marks a genuinely fresh start.
+// Arriving via an explicit /t/<id> link (a shared invite, or a resumed trip) is
+// never "minted", so the first-run welcome won't greet someone joining a trip.
 function currentTripId() {
   const m = location.pathname.match(/^\/t\/([^/]+)/);
-  if (m) return decodeURIComponent(m[1]);
+  if (m) return { id: decodeURIComponent(m[1]), minted: false };
   // No trip in the URL (a bare visit to "/"): resume the last trip seen on this
   // device, or mint a fresh one if there is none yet.
-  const id = lastTripId() || uid("trip-");
+  const last = lastTripId();
+  const id = last || uid("trip-");
   history.replaceState(null, "", `/t/${id}`);
-  return id;
+  return { id, minted: !last };
 }
 
 function wsUrl() {
@@ -67,10 +73,17 @@ function toast(message) {
 }
 
 async function main() {
-  const tripId = currentTripId();
+  const { id: tripId, minted } = currentTripId();
   dlog("boot: trip", tripId, "at", location.href);
   const log = await openTripStore(tripId);
   dlog(`boot: store opened — ${log.allOps().length} ops on device`, "device", log.device);
+
+  // First-run detection: a genuinely fresh device — the trip id was just minted
+  // (a bare "/" visit, not a shared /t/ link), this trip has no ops yet (no name,
+  // no travellers, no bills) AND the device remembers no other trip. Must be read
+  // BEFORE the first paint(), which calls rememberTrip() and would otherwise put
+  // this trip in the list. Drives the one-time welcome overlay.
+  const firstTime = minted && log.allOps().length === 0 && loadTrips().every((t) => t.id === tripId);
 
   const netEl = document.getElementById("net");
   const surface = document.getElementById("board-surface");
@@ -285,6 +298,20 @@ async function main() {
 
   log.subscribe(schedulePaint);
   paint();
+
+  // First-run welcome: greet a newcomer on a fresh device and let them seed the
+  // trip in one go. "Done" names the trip and adds the named travellers as ops
+  // (empty names are skipped; a blank trip name is left as-is); "Later" just
+  // dismisses. Emitting these ops flows through the normal subscribe -> repaint
+  // path, so the board fills in behind the fading overlay.
+  if (firstTime) {
+    showOnboarding({
+      onDone: ({ tripName, names }) => {
+        if (tripName) actions.setTripName(tripName);
+        for (const name of names) actions.addMember(name);
+      },
+    });
+  }
 
   // Top-bar + primary "add meal" button.
   document.getElementById("add-meal").addEventListener("click", actions.addMeal);
