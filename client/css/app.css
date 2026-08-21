@@ -159,6 +159,22 @@ textarea {
   -webkit-user-select: text;
   user-select: text;
 }
+/* Our text fields (meal/trip/traveller name, amount, exact share) carry
+   `type="search"` PURELY to stop Chrome / Android / password managers from
+   popping the password/credit-card/address autofill bar over them — that
+   autofill is never offered on a search field. See NO_AUTOFILL in ui/board.js.
+   Strip the search field's native chrome (rounded appearance + the ✕ clear
+   button) so they still render as our plain inputs. */
+input[type="search"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration,
+input[type="search"]::-webkit-search-results-button {
+  -webkit-appearance: none;
+  display: none;
+}
 button {
   cursor: pointer;
   border: none; /* no stray UA button outline; components add their own border */
