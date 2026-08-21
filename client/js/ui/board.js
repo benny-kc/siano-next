@@ -56,6 +56,20 @@ function el(tag, props = {}, ...kids) {
   return n;
 }
 
+// Attributes that stop Chrome / Android / a password manager from popping the
+// password / credit-card / address autofill bar over a plain field (the bar with
+// the key / card / location icons over the keyboard). `type: "search"` is the
+// load-bearing one — browsers never offer those autofills on a search field — and
+// the data-* opt-outs quiet LastPass / 1Password / Dashlane. Ported from the
+// reference app (its CLAUDE.md documents the same trick). Spread onto every text
+// field; pair with `inputmode: "decimal"` on money fields to keep the numeric pad.
+// CSS strips the search field's native clear button (`input[type="search"]` in
+// app.css) so it still reads as a plain input.
+const NO_AUTOFILL = {
+  type: "search", autocomplete: "off", autocorrect: "off", spellcheck: "false",
+  "data-lpignore": "true", "data-1p-ignore": true, "data-form-type": "other",
+};
+
 const signed = (cents) => (cents > 0 ? "+" : "") + format(cents);
 
 // A meal's creation time as "d Mon, HH:MM" in the VIEWER's local wall-clock
@@ -120,7 +134,7 @@ function mealCard(meal, snap, actions) {
     el("span", { class: "drag-handle drag-emoji", title: "Drag to move" }, meal.emoji || "🍽️"),
     el("input", {
       class: "meal-name", value: meal.name, placeholder: "Meal name", "aria-label": "Meal name",
-      title: "Tap to rename", autocomplete: "off",
+      title: "Tap to rename", ...NO_AUTOFILL, autocapitalize: "words",
       onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } },
       onchange: (e) => actions.setMealName(meal.id, e.target.value),
     }),
@@ -136,9 +150,9 @@ function mealCard(meal, snap, actions) {
   const total = el("div", { class: "meal-total" },
     el("span", { class: "label" }, "Total"),
     el("input", {
-      class: "amount-input siano-amount", inputmode: "decimal", "aria-label": "total",
+      class: "amount-input siano-amount", "aria-label": "total",
       value: meal.amountCents > 0 ? format(meal.amountCents) : "", placeholder: "0.00",
-      autocomplete: "off", dataset: { mealId: meal.id },
+      ...NO_AUTOFILL, inputmode: "decimal", dataset: { mealId: meal.id },
       onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } },
       onchange: (e) => actions.setAmountStr(meal.id, e.target.value),
     }),
@@ -156,9 +170,9 @@ function mealCard(meal, snap, actions) {
     const body = ui.editingShare === key
       ? el("form", { class: "share-form", onsubmit: (e) => { e.preventDefault(); const v = e.target.elements.value.value; actions.saveShare(meal.id, p.id, v); } },
           el("input", {
-            class: "share-edit", name: "value", inputmode: "decimal",
+            class: "share-edit", name: "value",
             value: p.locked ? format(p.shareCents) : "", placeholder: format(p.shareCents),
-            autocomplete: "off", "data-autofocus": "1",
+            ...NO_AUTOFILL, inputmode: "decimal", "data-autofocus": "1",
             onblur: (e) => actions.saveShare(meal.id, p.id, e.target.value),
           }),
         )
@@ -473,7 +487,7 @@ function travellersSection(snap, actions) {
     return el("li", { class: "member-item" },
       el("div", { class: "member-top" },
         el("span", { class: "mini-avatar", style: `background-color:${m.color}` }, m.initials || "?"),
-        el("input", { class: "member-name-input", value: m.name, "aria-label": "traveller name", onchange: (e) => actions.setMemberName(m.id, e.target.value) }),
+        el("input", { class: "member-name-input", value: m.name, "aria-label": "traveller name", ...NO_AUTOFILL, autocapitalize: "words", onchange: (e) => actions.setMemberName(m.id, e.target.value) }),
         el("button", {
           type: "button", class: "x-btn", title: "Remove traveller",
           dataset: { confirm: `Remove ${m.name} from the trip? Their meals and shares will be recalculated.`, confirmAction: `removeMember:${m.id}` },
@@ -485,7 +499,7 @@ function travellersSection(snap, actions) {
   });
 
   const addForm = el("form", { class: "add-row", onsubmit: (e) => { e.preventDefault(); const inp = e.target.elements.name; actions.addMember(inp.value); inp.value = ""; } },
-    el("input", { class: "text-input", name: "name", placeholder: "Add traveller…", autocomplete: "off" }),
+    el("input", { class: "text-input", name: "name", placeholder: "Add traveller…", ...NO_AUTOFILL, autocapitalize: "words" }),
     el("button", { class: "btn" }, "Add"),
   );
 
@@ -575,7 +589,7 @@ function tripNameSection(snap, actions) {
   return el("section", {},
     el("h3", {}, "Trip name"),
     el("input", {
-      class: "text-input text-input--full", value: snap.name, placeholder: "Name this trip…", "aria-label": "Trip name", autocomplete: "off",
+      class: "text-input text-input--full", value: snap.name, placeholder: "Name this trip…", "aria-label": "Trip name", ...NO_AUTOFILL, autocapitalize: "words",
       onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } },
       onchange: (e) => actions.setTripName(e.target.value),
     }),
