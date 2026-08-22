@@ -31,7 +31,7 @@ export const ui = {
   billsSort: "created_asc",
   editingShare: null, // "mealId:memberId" while a share is being typed
   ledgerMember: null, // which traveller the personal ledger is showing
-  quickAddMealId: null, // meal awaiting a transient "+ add all" (set by app.js)
+  quickAddMealId: null, // meal offering the "+ add all" shortcut (set by app.js)
 };
 
 // ── DOM helper ────────────────────────────────────────────────────────────────
@@ -231,11 +231,14 @@ function conflictNote(conflicts) {
   return el("div", { class: "conflict", title: "Two people set this at once — pick one." }, "⚠ " + bits.join("; "));
 }
 
-// ── Transient quick-actions row (above the dock) ──────────────────────────────
-// A deliberately subtle "+ add all" shortcut that app.js arms for a few seconds
-// right after a meal is created by dragging one traveller onto the board. It
-// pulls every remaining traveller into that fresh meal in one tap. Shown only
-// while `ui.quickAddMealId` points at a still-open meal that is missing someone.
+// ── Quick-actions row (above the dock) ────────────────────────────────────────
+// A deliberately subtle "+ add all" shortcut that app.js arms when a meal is
+// created by dragging one traveller onto the board. It pulls every remaining
+// traveller into that fresh meal in one tap. There is NO timer: the button is
+// shown while the meal has one or two participants and disappears the moment a
+// third traveller is added (or nobody is left to add) — the participant count
+// alone drives visibility.
+const QUICK_ADD_MAX_PARTICIPANTS = 3; // hide once the third traveller is on the meal
 function renderQuickActions(snap, actions) {
   const host = document.getElementById("quick-actions");
   if (!host) return;
@@ -244,7 +247,10 @@ function renderQuickActions(snap, actions) {
   const missing = meal
     ? snap.members.filter((mm) => !meal.participants.some((p) => p.id === mm.id))
     : [];
-  if (!meal || missing.length === 0) { host.replaceChildren(); return; }
+  if (!meal || missing.length === 0 || meal.participants.length >= QUICK_ADD_MAX_PARTICIPANTS) {
+    host.replaceChildren();
+    return;
+  }
   host.replaceChildren(
     el("button", {
       type: "button", class: "quick-add-all",

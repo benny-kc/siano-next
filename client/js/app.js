@@ -185,8 +185,9 @@ async function main() {
       const id = uid("meal-");
       log.emit((c) => ops.addMeal(c, id, { name: "", emoji: pick(EMOJIS), x, y, open: true }));
       addPerson(id, memberId);
-      // Offer a brief "+ add all" so the creator can pull the whole group into
-      // this fresh meal in one tap. Only worth it when others exist to add.
+      // Offer the "+ add all" shortcut so the creator can pull the whole group
+      // into this fresh meal in one tap. Only worth it when others exist to add;
+      // board.js keeps it visible until a third traveller is on the meal.
       if (log.snapshot().members.length > 1) armQuickAddAll(id);
     },
 
@@ -266,21 +267,17 @@ async function main() {
     });
   }
 
-  // ── Transient "+ add all" shortcut ─────────────────────────────────────────
-  // Armed for a few seconds when a meal is created by dragging one traveller
-  // onto the board; the button (rendered above the dock) pulls everyone else
-  // into that fresh meal in one tap. If ignored it just fades away on timeout.
-  const QUICK_ADD_MS = 6000;
-  let quickAddTimer = null;
+  // ── "+ add all" shortcut ────────────────────────────────────────────────────
+  // Armed when a meal is created by dragging one traveller onto the board; the
+  // button (rendered above the dock) pulls everyone else into that fresh meal in
+  // one tap. There is no timer — board.js shows it while the meal has one or two
+  // participants and hides it once a third traveller is added (or nobody is left
+  // to add), so visibility follows the participant count, not the clock.
   function armQuickAddAll(mealId) {
-    clearTimeout(quickAddTimer);
     ui.quickAddMealId = mealId;
     schedulePaint();
-    quickAddTimer = setTimeout(disarmQuickAddAll, QUICK_ADD_MS);
   }
   function disarmQuickAddAll() {
-    clearTimeout(quickAddTimer);
-    quickAddTimer = null;
     if (ui.quickAddMealId != null) { ui.quickAddMealId = null; schedulePaint(); }
   }
 
