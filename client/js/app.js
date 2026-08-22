@@ -278,10 +278,20 @@ async function main() {
     schedulePaint();
     quickAddTimer = setTimeout(disarmQuickAddAll, QUICK_ADD_MS);
   }
+  // Dismiss the shortcut. Crucially, the timeout path must NOT trigger a full
+  // board repaint: a repaint replaces the board's children, and if the user is
+  // mid-edit in a field (typing a bill amount, renaming a meal) that yanks focus
+  // out from under them and drops what they were typing. The button lives in its
+  // own stable container (#quick-actions) that a repaint only ever fills, so we
+  // clear just that node directly — the button vanishes silently in the
+  // background and every focused input is left completely untouched. The next
+  // natural repaint sees `ui.quickAddMealId === null` and renders it empty too.
   function disarmQuickAddAll() {
     clearTimeout(quickAddTimer);
     quickAddTimer = null;
-    if (ui.quickAddMealId != null) { ui.quickAddMealId = null; schedulePaint(); }
+    if (ui.quickAddMealId == null) return;
+    ui.quickAddMealId = null;
+    document.getElementById("quick-actions")?.replaceChildren();
   }
 
   interactions = initInteractions({ actions, schedulePaint });
