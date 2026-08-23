@@ -10,6 +10,9 @@
 //     convergence, BUT genuinely concurrent differing edits are surfaced as a
 //     conflict rather than silently overwritten. Money is always integer cents.
 
+import { registerVersion } from "../version.js";
+registerVersion("js/core/ops.js", 1);
+
 export const OP = Object.freeze({
   SET_TRIP_NAME: "set_trip_name",
 

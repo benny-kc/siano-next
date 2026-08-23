@@ -6,6 +6,9 @@
 // a shareable QR. `encodeText(text, ecl)` returns { size, modules } where
 // `modules` is a size×size array of booleans (true = dark).
 
+import { registerVersion } from "../version.js";
+registerVersion("js/vendor/qrcode.js", 1);
+
 const ECC = { L: 0, M: 1, Q: 2, H: 3 }
 
 // Number of error-correction codewords per block, indexed [ecl][version].

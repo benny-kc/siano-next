@@ -6,6 +6,9 @@
 // last trip seen. Browser-only (localStorage) — verified in-browser, like the
 // IndexedDB store.
 
+import { registerVersion } from "../version.js";
+registerVersion("js/store/trips.js", 1);
+
 const KEY = "siano:trips";
 const MAX = 50;
 

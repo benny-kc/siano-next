@@ -27,7 +27,10 @@ import { applyTypography, setFont, stepScale, stepWeight, setTheme, resetTypogra
 import { installFullscreen, fullscreenPreferred, setFullscreenPreferred } from "./ui/fullscreen.js";
 import { initInstall, promptInstall } from "./ui/install.js";
 import { showOnboarding } from "./ui/onboarding.js";
+import { debugEnabled, setDebugEnabled } from "./ui/debug.js";
 import { dlog, derror } from "./log.js";
+import { registerVersion } from "./version.js";
+registerVersion("js/app.js", 1);
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const EMOJIS = ["🍽️", "🍕", "🍔", "🍜", "🍣", "🥘", "🍰", "🍺", "🍷", "☕", "🛒", "🚕", "🏨", "🎟️", "⛽", "🍦"];
@@ -221,6 +224,10 @@ async function main() {
     setTheme: (t) => { setTheme(t); schedulePaint(); },
     toggleFullscreen: () => { setFullscreenPreferred(!fullscreenPreferred()); schedulePaint(); },
     resetAppearance: () => { resetTypography(); schedulePaint(); },
+
+    // Per-device Debug toggle: shows the per-file JS version readout in Settings
+    // (see ui/debug.js + ui/board.js debugSection). A client-only aid.
+    toggleDebug: () => { setDebugEnabled(!debugEnabled()); schedulePaint(); },
 
     // PWA install: replay Chromium's captured prompt (must run from this click).
     // The section repaints itself via initInstall's hook when the state changes.

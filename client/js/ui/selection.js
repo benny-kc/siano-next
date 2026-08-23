@@ -7,6 +7,9 @@
 // re-apply the `.is-selected` ring after a repaint (a repaint re-creates the
 // tokens), and interactions.js flips it live on tap without waiting for a paint.
 
+import { registerVersion } from "../version.js";
+registerVersion("js/ui/selection.js", 1);
+
 export let selectedMember = null;
 
 export function setSelectedTraveller(id) {

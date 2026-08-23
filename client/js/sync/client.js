@@ -21,6 +21,8 @@
 // offline-created ops back UP, so those bills stay stranded on one device.
 
 import { dlog, dwarn } from "../log.js";
+import { registerVersion } from "../version.js";
+registerVersion("js/sync/client.js", 1);
 
 export class SyncClient {
   /**

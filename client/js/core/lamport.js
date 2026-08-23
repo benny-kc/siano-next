@@ -15,6 +15,9 @@
 //
 // Trips have only a handful of devices, so an O(devices) vector per op is cheap.
 
+import { registerVersion } from "../version.js";
+registerVersion("js/core/lamport.js", 1);
+
 export class Clock {
   /**
    * @param {string} device  stable per-device id (keypair fingerprint later)

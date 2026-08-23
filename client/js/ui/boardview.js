@@ -7,6 +7,9 @@
 // reference. All card/traveller coordinate math converts between screen and
 // canvas space through BoardView so dragging stays accurate at any zoom/pan.
 
+import { registerVersion } from "../version.js";
+registerVersion("js/ui/boardview.js", 1);
+
 export const BoardView = {
   scale: 1,
   panX: 0,
