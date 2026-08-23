@@ -267,6 +267,87 @@ display and decode loops concurrently in both directions.
 
 ---
 
+## 4b. Hybrid: QR-forward + audio-back (asymmetric full-duplex)
+
+The most practical duplex of all of these: **one optical path + one acoustic
+path, in opposite directions.** Phone A shows a **QR fountain** on its screen; B
+points its **rear (main) camera** at it and decodes — that's the fat forward
+pipe. At the same time B **emits audio** (FSK, §8) that A listens for with its
+mic — a thin back-channel carrying `have`/`want`/acks. Two-way, but deliberately
+**asymmetric**: fast one way, slow the other. Which is exactly the traffic shape
+(bulk ops down, tiny acknowledgements up — like ADSL or a satellite-down /
+dial-up-up link).
+
+### Why this beats the earlier duplex ideas
+
+- **No screen-to-screen alignment** (the hard part of §4a): only *one* optical
+  path (B's camera → A's screen), like scanning any QR. The return path is audio
+  — **omnidirectional, no aiming**.
+- **Uses the rear camera, not the front:** higher resolution and better
+  close-focus than §4a's front camera → a **faster, more reliable** forward
+  channel.
+- **Only one side emits audio**, so the two-band / self-echo complexity of the
+  audio-only duplex (§8) disappears — it's plain half-duplex FSK in one
+  direction.
+- **The two media don't interfere** (light vs sound), so both run concurrently
+  with zero coordination.
+
+### What the back-channel buys — from dumb to smart
+
+Without a return channel a fountain is "blind" (loop forever / guess a duration).
+The audio back-channel closes the loop, with a spectrum of sophistication:
+
+1. **"Done" beep.** A fountains the payload; B decodes until complete, then audio-
+   sends "complete"; A stops. Overshoot is harmless (`ingestMany` is idempotent
+   and order-free).
+2. **Periodic NACK digest.** Every ~1–2 s B audio-sends a compact "still missing"
+   summary (highest-contiguous-seq + a small bitmap of holes, or coverage %); A
+   biases which fountain symbols to emit.
+3. **`have`-digest bootstrap (best).** B *starts* by audio-sending a compact
+   digest of the op-ids it holds; A computes the delta (`log.have()` diff) and
+   fountains **only the ops B lacks**, then B acks done. The forward channel
+   carries `ops`, the back-channel carries the `have`/`want` negotiation — it's
+   the app's existing sync handshake (`client/js/sync/client.js`) split across
+   two media by bandwidth.
+
+### Genuine two-way *data* (not just acks)
+
+The common case is "A has the bills, B downloads." For a real both-edited merge:
+either **B dribbles its few ops over audio too** (10–100 B/s is fine for a couple
+of bills), or **swap roles for a quick phase 2** (B shows QR, A scans) to move
+B's ops the fast way. Above the transport seam it's the same peer session calling
+`ingestMany` either way.
+
+### Components (nothing new beyond what's already listed)
+
+- **A (sender):** QR-fountain display (shipped encoder `client/js/vendor/qrcode.js`)
+  **+** mic listening for FSK acks (ggwave, §8).
+- **B (receiver):** rear-camera QR decode (vendored decoder, §5) **+** FSK audio
+  transmit for acks.
+- A `HybridLink` transport = `QrForward ⊕ AudioBack`, feeding the existing peer
+  session. **No dependency beyond the QR decoder and ggwave the doc already calls
+  for.**
+
+### Caveats & graceful degradation
+
+- **Restaurant noise still hits the audio path** — but the asymmetry saves you:
+  acks are tiny and infrequent, so you can spend lavish airtime on heavy FEC +
+  repetition per ack. A robust "done" beep survives far more noise than a bulk
+  audio transfer would.
+- **If audio fails entirely, fall back to a timed/looped fountain** — A emits for
+  a generous fixed duration or N loops. That's exactly the one-way QR of §4, so
+  the hybrid never does *worse* than the baseline; audio only makes it faster and
+  confirmable.
+- **Audio decode latency** (a few hundred ms) is a non-issue: the forward channel
+  is rateless, so A just keeps emitting until the ack lands.
+
+**Bottom line:** asymmetric by design, best-camera on the fast path, aiming-free
+return path, a single audio emitter (no echo/duplex complexity), and it degrades
+cleanly to plain one-way QR if the mic path dies — the most practical duplex of
+everything sketched here.
+
+---
+
 ## 5. The one honest catch: we need a QR *decoder*
 
 We ship a QR **encoder** but not a **decoder** — decoding is real image
@@ -309,6 +390,7 @@ browser. This is the shape of the API, not something we can code around.
 |---|---|---|---|
 | **QR code (this doc)** | ✅ fully offline, everywhere | ✅ | **Recommended first path** |
 | **Audio (acoustic modem)** | ✅ fully offline, everywhere | ✅ | Complementary channel — hands-free + one-to-many (§8) |
+| **Hybrid QR-forward + audio-back** | ✅ fully offline, everywhere | ✅ | Asymmetric full-duplex; most practical two-way (§4b) |
 | **Web Bluetooth** | ❌ central-only, can't be a peer | ❌ | Not usable |
 | **WebRTC DataChannel** | ⚠️ needs a shared *local IP* link (Wi-Fi / hotspot) + out-of-band signaling | ✅ | Best path for a *live* nearby session (§7) |
 | **Web NFC** | tap-only, tiny NDEF, Android Chrome only | ❌ | Bootstrap/handoff at most |
@@ -441,6 +523,10 @@ QR is the stronger primary; audio is a compelling optional second channel.
    - *(stretch)* a **bidirectional / animated-QR link (§4a)** — screen-to-screen
      full-duplex that runs the real `have`/`want`/`op` sync, not just one bill;
      start with the turn-taking half-duplex MVP.
+   - *(stretch, preferred duplex)* the **hybrid QR-forward + audio-back link
+     (§4b)** — rear-camera QR down, FSK acks up; no screen alignment, degrades to
+     plain one-way QR if the mic path dies. Combines the §5 decoder and the §8
+     audio work, so it's most natural *after* both exist.
 3. **Add the audio (acoustic modem) channel (§8) as an optional second path**
    if hands-free or one-to-many broadcast is wanted — vendor ggwave/Quiet.js,
    feed decoded bytes into the same packager/`ingestMany` seam, start
