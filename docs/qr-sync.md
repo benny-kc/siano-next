@@ -163,6 +163,110 @@ Safety properties that fall out of the existing model:
 
 ---
 
+## 4a. Bidirectional / animated QR (screen-to-screen full-duplex)
+
+The flow above is one-way (A → B, one bill). It generalises to a **two-way
+optical link**: prop the two phones facing each other so each **front camera**
+watches the other's **screen**, and each phone both shows a QR and reads the
+other's at the same time. The geometry works — on any phone the front camera and
+the screen are on the *same* face, so when A's screen faces B, A's camera faces B
+too. Both directions run at once → full-duplex.
+
+### The payoff: this is the full sync protocol, not one bill
+
+A one-way QR can't ask questions, so it carries one bill. A *two-way* channel can
+run the app's real sync handshake — the same `hello` / `have` / `want` / `op`
+exchange `SyncClient` already speaks (`client/js/sync/client.js`), over light
+instead of a WebSocket:
+
+1. Each side shows the op-ids it holds (`log.have()`).
+2. Each computes the delta and shows the ops the other lacks.
+3. Each `ingestMany`s what it reads.
+
+So you get a **full bidirectional trip sync** between two offline phones, not
+just a single-bill push — and it drops straight onto the transport-seam refactor
+(§8/§9): the visual link is just another transport under the same peer session.
+
+### Don't frame-lock the phones — self-clock instead
+
+The tempting-but-wrong model is lockstep "A shows → B reads → B shows → A reads."
+Screens refresh ~60 fps, cameras capture ~30 fps, nothing is synchronised, and
+you'll capture torn, half-drawn frames. The robust model is **asynchronous and
+self-clocked**:
+
+- Each phone independently updates its on-screen QR at a modest rate (~5–10
+  QR/sec) and independently grabs whatever QR is *currently* on the other screen
+  (decode via `requestVideoFrameCallback`).
+- Every QR frame carries a small header `{ seq, ackUpTo, total, crc }`. The
+  reader dedups by `seq` and **rejects any frame failing `crc`** — that's how a
+  torn capture is thrown away.
+- Hold each QR for ~2–3 camera frames (update ~10 Hz against a 30 fps camera) so
+  every QR is captured cleanly at least once. No timing coupling between devices.
+
+### The link layer — ACKs are free because it's two-way
+
+Because each phone can *see* the other's screen, the back-channel gives real
+acknowledgements, so you needn't repeat blindly:
+
+- **Piggybacked ACK / sliding-window ARQ** (efficient path): B's outgoing QR
+  carries `ackUpTo: 7` ("got your chunks through 7, send 8+"); A advances its
+  window and re-shows anything an ACK doesn't cover.
+- **Fountain codes (LT/Raptor)** (simplest MVP): A cycles endless coded frames of
+  its payload; B collects *any* "enough" of them and signals done on its
+  channel — the same carousel idea as the audio modem (§8), no per-chunk
+  bookkeeping.
+
+Either way the op-log is forgiving: `ingestMany` is **idempotent and order-free**,
+so duplicate / out-of-order / re-read frames are harmless — the link layer only
+has to move *enough* bytes, not exact ordering.
+
+### Pieces to build (all reuse what's already planned)
+
+- **Front camera:** `getUserMedia({ video: { facingMode: "user" } })` + the
+  **vendored QR decoder** (§5).
+- **Display:** the shipped **encoder** (`client/js/vendor/qrcode.js`) repainting
+  the current outbound frame on a `<canvas>`.
+- **A `VisualLink` transport** — `send(frame)` / `onFrame(cb)` — running the
+  display loop and the decode loop.
+- **A link layer** (seq/ack/crc, or fountain) on top, then **the existing peer
+  session** (`have`/`want`/`op`) on top of that → full two-way sync.
+
+### Front-camera gotchas
+
+- **Focus/quality:** front cameras are low-res and focus poorly at ~15 cm — keep
+  QR **low-density** (small version, more frames) so modules stay big; trade
+  payload-per-frame for reliability.
+- **Camera↔screen parallax:** the front camera sits at the top edge, so render
+  the QR where the *other* camera can see it (large, centred, quiet-zone border)
+  and show an **alignment guide**.
+- **Glare/brightness:** force screen brightness up; matte the QR surround.
+- **No mirroring issue:** you're imaging a *separate* device, so it's not a
+  selfie — the QR reads normally.
+
+### Throughput
+
+At QR version ~10 (~270 bytes/frame) and ~5 clean reads/sec **per direction**,
+~1.3 KB/s each way — a whole trip's ops (a few KB) in seconds to tens of seconds.
+**Color barcodes** (cimbar-style, several bits per cell) can push this 5–10× at
+the cost of a custom codec and white-balance sensitivity — a v2 lever, not the
+MVP.
+
+### Recommended scope
+
+Simultaneous full-duplex (both phones propped facing each other) is the target,
+but the alignment UX is the real cost. Ship in two steps:
+
+1. **MVP — turn-taking (half-duplex):** A animates its fountain-QR payload while
+   B reads, then swap roles for the reverse delta. One camera active at a time,
+   dead simple, still achieves full two-way sync.
+2. **v2 — simultaneous full-duplex** with piggybacked ACKs, once the decoder and
+   alignment UX are proven.
+
+Both are the same `VisualLink` + peer-session stack; full-duplex just runs the
+display and decode loops concurrently in both directions.
+
+---
+
 ## 5. The one honest catch: we need a QR *decoder*
 
 We ship a QR **encoder** but not a **decoder** — decoding is real image
@@ -334,6 +438,9 @@ QR is the stronger primary; audio is a compelling optional second channel.
    - a **vendored decoder** + in-PWA camera (`getUserMedia`) — the one new
      dependency (§5),
    - an optional **import-preview** step (UX, not security).
+   - *(stretch)* a **bidirectional / animated-QR link (§4a)** — screen-to-screen
+     full-duplex that runs the real `have`/`want`/`op` sync, not just one bill;
+     start with the turn-taking half-duplex MVP.
 3. **Add the audio (acoustic modem) channel (§8) as an optional second path**
    if hands-free or one-to-many broadcast is wanted — vendor ggwave/Quiet.js,
    feed decoded bytes into the same packager/`ingestMany` seam, start
