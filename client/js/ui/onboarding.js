@@ -12,6 +12,9 @@
 // travellers as ops); "Later" — or the backdrop — just dismisses it. Either way
 // the overlay is a one-shot for this boot: dismissing it never reopens it.
 
+import { registerVersion } from "../version.js";
+registerVersion("js/ui/onboarding.js", 1);
+
 const START_ROWS = 3; // a few empty name fields to invite more than one traveller
 const MAX_ROWS = 24; // a soft cap so "+" can't spawn an unbounded list
 

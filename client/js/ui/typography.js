@@ -15,6 +15,9 @@
 // Fonts are SYSTEM stacks only — the app is offline-first behind a tight CSP, so
 // no web fonts are loaded. The five options render distinctly on every device.
 
+import { registerVersion } from "../version.js";
+registerVersion("js/ui/typography.js", 1);
+
 const KEY = "siano:type";
 
 export const FONTS = [

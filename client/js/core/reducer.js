@@ -20,6 +20,8 @@
 
 import { OP } from "./ops.js";
 import { compareOps, causallyAfter, frontier } from "./lamport.js";
+import { registerVersion } from "../version.js";
+registerVersion("js/core/reducer.js", 1);
 
 function maxByOrder(ops) {
   return ops.reduce((best, o) => (compareOps(o, best) > 0 ? o : best), ops[0]);

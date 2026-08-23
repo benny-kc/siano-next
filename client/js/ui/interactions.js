@@ -14,6 +14,8 @@ import { BoardView } from "./boardview.js";
 import { View } from "./viewstate.js";
 import { ui } from "./board.js";
 import { selectedMember, setSelectedTraveller, clearSelectedTraveller } from "./selection.js";
+import { registerVersion } from "../version.js";
+registerVersion("js/ui/interactions.js", 1);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag

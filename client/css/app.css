@@ -1630,6 +1630,40 @@ button {
   background: var(--amber-400);
   color: var(--on-accent);
 }
+/* Debug: per-file JS version readout (shown when the Debug toggle is on). */
+.debug-note {
+  margin: 0.5rem 0 0.5rem;
+  font-size: 0.75rem;
+  color: var(--slate-400);
+}
+.debug-versions {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  list-style: none;
+  border-radius: 0.625rem;
+  background: var(--slate-800);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+.debug-ver-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.15rem 0;
+}
+.debug-ver-row + .debug-ver-row {
+  border-top: 1px solid var(--hairline);
+}
+.debug-ver-file {
+  color: var(--slate-300);
+  word-break: break-all;
+}
+.debug-ver-num {
+  flex-shrink: 0;
+  font-weight: var(--fw-bold);
+  color: var(--amber-300);
+}
 .seg {
   display: flex;
   gap: 0.25rem;

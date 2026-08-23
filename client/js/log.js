@@ -9,6 +9,9 @@
 // Errors always print — they surface only in devtools, never to the user, and
 // swallowing a genuine fault would defeat the point of having logs at all.
 
+import { registerVersion } from "./version.js";
+registerVersion("js/log.js", 1);
+
 export const DEBUG = typeof window !== "undefined" && window.__SIANO_DEBUG__ === true;
 
 const stamp = () => new Date().toISOString().slice(11, 23);

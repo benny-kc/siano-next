@@ -8,6 +8,8 @@
 
 import { customSplit, balances, settlements } from "./split.js";
 import { resolveBudgets, buildBudgets } from "./budgets.js";
+import { registerVersion } from "../version.js";
+registerVersion("js/core/snapshot.js", 1);
 
 const lockedShares = (meal) => meal.lockedShares || {};
 const photosOf = (meal) => meal.photos || [];

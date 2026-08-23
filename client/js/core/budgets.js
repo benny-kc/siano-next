@@ -10,6 +10,9 @@
 // and to the order people were linked, and never leaves the "root" of a shared
 // budget looking like they are on their own.
 
+import { registerVersion } from "../version.js";
+registerVersion("js/core/budgets.js", 1);
+
 /** A member's budget pointer defaults to their own id (a budget of one). */
 export function budgetPointer(member) {
   return member.budgetId || member.id;

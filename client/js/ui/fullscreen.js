@@ -12,6 +12,9 @@
 // as an installed PWA (standalone), the request is a no-op — the toggle still
 // remembers the choice.
 
+import { registerVersion } from "../version.js";
+registerVersion("js/ui/fullscreen.js", 1);
+
 const KEY = "siano:fullscreen";
 const root = document.documentElement;
 

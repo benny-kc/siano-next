@@ -13,6 +13,8 @@ import { Clock, opId } from "../core/lamport.js";
 import { fold } from "../core/reducer.js";
 import { buildSnapshot } from "../core/snapshot.js";
 import { openDb, get, put, putMany, getAll } from "./idb.js";
+import { registerVersion } from "../version.js";
+registerVersion("js/store/oplog.js", 1);
 
 function newDeviceId() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID();

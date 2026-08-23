@@ -11,6 +11,9 @@
 // bug behind two "a fixed share got silently edited" reports. Any genuine gap
 // is surfaced as the meal's diff (see snapshot.js) for humans to reconcile.
 
+import { registerVersion } from "../version.js";
+registerVersion("js/core/split.js", 1);
+
 /**
  * Split `amountCents` evenly across `participantIds`.
  *

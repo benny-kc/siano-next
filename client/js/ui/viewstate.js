@@ -13,6 +13,9 @@
 //   data-siano-report   = present when the report overlay is open
 //   data-siano-sortmenu = present when the Bills sort popover is open
 
+import { registerVersion } from "../version.js";
+registerVersion("js/ui/viewstate.js", 1);
+
 const root = document.documentElement;
 
 // ── Android-/browser-Back integration ──────────────────────────────────────
