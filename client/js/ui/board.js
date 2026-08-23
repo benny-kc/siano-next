@@ -25,8 +25,9 @@ import { FONTS, getTypography, SCALE_MIN, SCALE_MAX, WEIGHT_MIN, WEIGHT_MAX } fr
 import { fullscreenPreferred } from "./fullscreen.js";
 import { installState } from "./install.js";
 import { debugEnabled } from "./debug.js";
+import { DEBUG } from "../log.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 1);
+registerVersion("js/ui/board.js", 2);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -385,12 +386,18 @@ function renderMenu(snap, actions) {
   );
 }
 
-// Debug — a per-device switch (localStorage, see ui/debug.js). Off by default.
-// When on, it lists every loaded JS module's embedded version (ui/version.js),
-// so you can confirm from the device itself whether it is running the latest
-// build or serving a stale cached copy of some file — each module reports its
-// OWN number, so a partially-cached device shows exactly which file is stale.
+// Debug — a per-device switch (localStorage, see ui/debug.js). When on, it lists
+// every loaded JS module's embedded version (version.js), so you can confirm
+// from the device itself whether it is running the latest build or serving a
+// stale cached copy of some file — each module reports its OWN number, so a
+// partially-cached device shows exactly which file is stale.
+//
+// The whole section is GATED behind the operator flag SIANO_CLIENT_DEBUG (read
+// via window.__SIANO_DEBUG__ / log.js's DEBUG): a normal user never sees it, and
+// only when the operator turns the flag on server-side (+ hub restart) does the
+// switch appear in Settings. Returns null otherwise (renderMenu filters it out).
 function debugSection(actions) {
+  if (!DEBUG) return null;
   const on = debugEnabled();
   const toggle = el("div", { class: "appear-row" },
     el("span", { class: "lbl" }, "Debug"),
