@@ -6,6 +6,9 @@
 // cross a boundary and never get synced. These helpers are pure and have no
 // dependencies so they run unchanged in the browser and under `node --test`.
 
+import { registerVersion } from "../version.js";
+registerVersion("js/core/money.js", 1);
+
 /**
  * Parse a user-supplied amount (`"42.50"`, `"7"`, `"3,20"`, or a number) into
  * integer cents. Returns `{ ok: true, cents }` or `{ ok: false }`.

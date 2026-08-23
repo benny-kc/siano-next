@@ -14,10 +14,11 @@
 // (pan/zoom) and ui/viewstate.js (drawer state).
 
 import { openTripStore } from "./store/oplog.js";
-import { lastTripId, rememberTrip, forgetTrip } from "./store/trips.js";
+import { lastTripId, rememberTrip, forgetTrip, loadTrips } from "./store/trips.js";
 import { SyncClient } from "./sync/client.js";
 import * as ops from "./core/ops.js";
 import { parse } from "./core/money.js";
+import { initialsFor } from "./core/snapshot.js";
 import { render, ui, downloadReportCsv } from "./ui/board.js";
 import { BoardView } from "./ui/boardview.js";
 import { installViewState, View } from "./ui/viewstate.js";
@@ -25,7 +26,11 @@ import { initInteractions } from "./ui/interactions.js";
 import { applyTypography, setFont, stepScale, stepWeight, setTheme, resetTypography, SCALE_STEP, WEIGHT_STEP } from "./ui/typography.js";
 import { installFullscreen, fullscreenPreferred, setFullscreenPreferred } from "./ui/fullscreen.js";
 import { initInstall, promptInstall } from "./ui/install.js";
+import { showOnboarding } from "./ui/onboarding.js";
+import { debugEnabled, setDebugEnabled } from "./ui/debug.js";
 import { dlog, derror } from "./log.js";
+import { registerVersion } from "./version.js";
+registerVersion("js/app.js", 1);
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const EMOJIS = ["🍽️", "🍕", "🍔", "🍜", "🍣", "🥘", "🍰", "🍺", "🍷", "☕", "🛒", "🚕", "🏨", "🎟️", "⛽", "🍦"];
@@ -33,23 +38,21 @@ const uid = (p) =>
   (globalThis.crypto?.randomUUID ? crypto.randomUUID() : p + Math.random().toString(36).slice(2, 10));
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-function initials(name) {
-  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
 // Trip id lives in the URL as /t/<id>; mint one if absent so a fresh visit is a
-// shareable trip immediately.
+// shareable trip immediately. Returns `{ id, minted }` — `minted` is true only
+// when we generated a brand-new id (a bare "/" visit with no trip in the URL and
+// no remembered trip to resume), which is what marks a genuinely fresh start.
+// Arriving via an explicit /t/<id> link (a shared invite, or a resumed trip) is
+// never "minted", so the first-run welcome won't greet someone joining a trip.
 function currentTripId() {
   const m = location.pathname.match(/^\/t\/([^/]+)/);
-  if (m) return decodeURIComponent(m[1]);
+  if (m) return { id: decodeURIComponent(m[1]), minted: false };
   // No trip in the URL (a bare visit to "/"): resume the last trip seen on this
   // device, or mint a fresh one if there is none yet.
-  const id = lastTripId() || uid("trip-");
+  const last = lastTripId();
+  const id = last || uid("trip-");
   history.replaceState(null, "", `/t/${id}`);
-  return id;
+  return { id, minted: !last };
 }
 
 function wsUrl() {
@@ -67,10 +70,17 @@ function toast(message) {
 }
 
 async function main() {
-  const tripId = currentTripId();
+  const { id: tripId, minted } = currentTripId();
   dlog("boot: trip", tripId, "at", location.href);
   const log = await openTripStore(tripId);
   dlog(`boot: store opened — ${log.allOps().length} ops on device`, "device", log.device);
+
+  // First-run detection: a genuinely fresh device — the trip id was just minted
+  // (a bare "/" visit, not a shared /t/ link), this trip has no ops yet (no name,
+  // no travellers, no bills) AND the device remembers no other trip. Must be read
+  // BEFORE the first paint(), which calls rememberTrip() and would otherwise put
+  // this trip in the list. Drives the one-time welcome overlay.
+  const firstTime = minted && log.allOps().length === 0 && loadTrips().every((t) => t.id === tripId);
 
   const netEl = document.getElementById("net");
   const surface = document.getElementById("board-surface");
@@ -126,7 +136,7 @@ async function main() {
       const n = log.snapshot().members.length;
       const nm = (name && name.trim()) || `Traveller ${n + 1}`;
       const id = uid("m-");
-      log.emit((c) => ops.addMember(c, id, { name: nm, color: PALETTE[n % PALETTE.length], initials: initials(nm) }));
+      log.emit((c) => ops.addMember(c, id, { name: nm, color: PALETTE[n % PALETTE.length], initials: initialsFor(nm) || "?" }));
     },
     setMemberName: (id, name) => log.emit((c) => ops.setMemberName(c, id, name)),
     removeMember: (id) => log.emit((c) => ops.removeMember(c, id)),
@@ -215,6 +225,10 @@ async function main() {
     toggleFullscreen: () => { setFullscreenPreferred(!fullscreenPreferred()); schedulePaint(); },
     resetAppearance: () => { resetTypography(); schedulePaint(); },
 
+    // Per-device Debug toggle: shows the per-file JS version readout in Settings
+    // (see ui/debug.js + ui/board.js debugSection). A client-only aid.
+    toggleDebug: () => { setDebugEnabled(!debugEnabled()); schedulePaint(); },
+
     // PWA install: replay Chromium's captured prompt (must run from this click).
     // The section repaints itself via initInstall's hook when the state changes.
     installApp: async () => {
@@ -271,10 +285,20 @@ async function main() {
     schedulePaint();
     quickAddTimer = setTimeout(disarmQuickAddAll, QUICK_ADD_MS);
   }
+  // Dismiss the shortcut. Crucially, the timeout path must NOT trigger a full
+  // board repaint: a repaint replaces the board's children, and if the user is
+  // mid-edit in a field (typing a bill amount, renaming a meal) that yanks focus
+  // out from under them and drops what they were typing. The button lives in its
+  // own stable container (#quick-actions) that a repaint only ever fills, so we
+  // clear just that node directly — the button vanishes silently in the
+  // background and every focused input is left completely untouched. The next
+  // natural repaint sees `ui.quickAddMealId === null` and renders it empty too.
   function disarmQuickAddAll() {
     clearTimeout(quickAddTimer);
     quickAddTimer = null;
-    if (ui.quickAddMealId != null) { ui.quickAddMealId = null; schedulePaint(); }
+    if (ui.quickAddMealId == null) return;
+    ui.quickAddMealId = null;
+    document.getElementById("quick-actions")?.replaceChildren();
   }
 
   interactions = initInteractions({ actions, schedulePaint });
@@ -285,6 +309,20 @@ async function main() {
 
   log.subscribe(schedulePaint);
   paint();
+
+  // First-run welcome: greet a newcomer on a fresh device and let them seed the
+  // trip in one go. "Done" names the trip and adds the named travellers as ops
+  // (empty names are skipped; a blank trip name is left as-is); "Later" just
+  // dismisses. Emitting these ops flows through the normal subscribe -> repaint
+  // path, so the board fills in behind the fading overlay.
+  if (firstTime) {
+    showOnboarding({
+      onDone: ({ tripName, names }) => {
+        if (tripName) actions.setTripName(tripName);
+        for (const name of names) actions.addMember(name);
+      },
+    });
+  }
 
   // Top-bar + primary "add meal" button.
   document.getElementById("add-meal").addEventListener("click", actions.addMeal);

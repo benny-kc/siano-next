@@ -34,6 +34,17 @@ operations relayed by a dumb hub.**
   `"type":"module"`; the hub is ESM via `hub/package.json`. Tests are `.mjs`.
   **`Date.now()`/`Math.random()` are fine here** (normal Node/browser, not a
   workflow sandbox).
+- **Per-file version — bump it whenever you edit a `client/js/**/*.js` file.**
+  Every client module calls `registerVersion("js/…", N)` at import time (the
+  number is embedded in the file). **When you change a file, increment its
+  number by one.** The Settings drawer's **Debug** toggle (per-device,
+  `siano:debug`) lists every loaded module's version, so a device can prove
+  whether it's running your change or a stale cached copy — and because each
+  module reports its OWN number, it pinpoints exactly which file is stale. This
+  is a debugging aid, separate from the operator-only `SIANO_CLIENT_DEBUG`
+  gating in `js/log.js`. `js/version.js` is the leaf registry (imports nothing,
+  so it never creates a cycle for the asset-hash topo sort). This is on top of —
+  not instead of — the service-worker `CACHE` bump below.
 
 ---
 

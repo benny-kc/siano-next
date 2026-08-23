@@ -24,6 +24,10 @@ import { loadTrips } from "../store/trips.js";
 import { FONTS, getTypography, SCALE_MIN, SCALE_MAX, WEIGHT_MIN, WEIGHT_MAX } from "./typography.js";
 import { fullscreenPreferred } from "./fullscreen.js";
 import { installState } from "./install.js";
+import { debugEnabled } from "./debug.js";
+import { DEBUG } from "../log.js";
+import { registerVersion, fileVersions } from "../version.js";
+registerVersion("js/ui/board.js", 2);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -375,10 +379,52 @@ function renderMenu(snap, actions) {
       tripNameSection(snap, actions),
       tripsSection(snap, actions),
       appearanceSection(actions),
+      debugSection(actions),
       helpSection(),
       disclaimerSection(),
     ].filter(Boolean),
   );
+}
+
+// Debug — a per-device switch (localStorage, see ui/debug.js). When on, it lists
+// every loaded JS module's embedded version (version.js), so you can confirm
+// from the device itself whether it is running the latest build or serving a
+// stale cached copy of some file — each module reports its OWN number, so a
+// partially-cached device shows exactly which file is stale.
+//
+// The whole section is GATED behind the operator flag SIANO_CLIENT_DEBUG (read
+// via window.__SIANO_DEBUG__ / log.js's DEBUG): a normal user never sees it, and
+// only when the operator turns the flag on server-side (+ hub restart) does the
+// switch appear in Settings. Returns null otherwise (renderMenu filters it out).
+function debugSection(actions) {
+  if (!DEBUG) return null;
+  const on = debugEnabled();
+  const toggle = el("div", { class: "appear-row" },
+    el("span", { class: "lbl" }, "Debug"),
+    el("button", {
+      type: "button", class: "toggle", "aria-pressed": String(on),
+      onclick: () => actions.toggleDebug(),
+    }, on ? "On" : "Off"),
+  );
+
+  const kids = [el("h3", {}, "🐞 Debug"), toggle];
+  if (on) {
+    const list = el("ul", { class: "debug-versions" },
+      ...fileVersions().map(({ file, version }) =>
+        el("li", { class: "debug-ver-row" },
+          el("span", { class: "debug-ver-file" }, file),
+          el("span", { class: "debug-ver-num" }, `v${version}`),
+        )),
+    );
+    // How the page itself was served — is a service worker (the offline shell
+    // cache) controlling this tab? A stale cache is the usual culprit here.
+    const sw = navigator.serviceWorker && navigator.serviceWorker.controller ? "service worker" : "network";
+    kids.push(
+      el("p", { class: "debug-note" }, `Loaded ${fileVersions().length} JS modules · served via ${sw}.`),
+      list,
+    );
+  }
+  return el("section", {}, ...kids);
 }
 
 // The iOS "Share" glyph as inline SVG (SF Symbols don't render in web content).

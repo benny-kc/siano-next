@@ -11,6 +11,9 @@
 // `beforeinstallprompt` is never missed; `initInstall(onChange)` wires a repaint
 // so an open drawer updates the moment the event lands.
 
+import { registerVersion } from "../version.js";
+registerVersion("js/ui/install.js", 1);
+
 let deferredPrompt = null; // the stashed beforeinstallprompt event (Chromium)
 let onChange = null; // repaint hook (set by initInstall)
 

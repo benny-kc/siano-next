@@ -7,6 +7,9 @@
 // grows. Browser-only — it touches `indexedDB`, so it is not exercised by the
 // Node test suite (the pure reducer it feeds is).
 
+import { registerVersion } from "../version.js";
+registerVersion("js/store/idb.js", 1);
+
 /** Open (creating/upgrading) a DB with the given object stores. */
 export function openDb(name, version, stores) {
   return new Promise((resolve, reject) => {
