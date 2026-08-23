@@ -204,6 +204,7 @@ browser. This is the shape of the API, not something we can code around.
 | Transport | Phone↔phone, no internet? | iOS? | Verdict |
 |---|---|---|---|
 | **QR code (this doc)** | ✅ fully offline, everywhere | ✅ | **Recommended first path** |
+| **Audio (acoustic modem)** | ✅ fully offline, everywhere | ✅ | Complementary channel — hands-free + one-to-many (§8) |
 | **Web Bluetooth** | ❌ central-only, can't be a peer | ❌ | Not usable |
 | **WebRTC DataChannel** | ⚠️ needs a shared *local IP* link (Wi-Fi / hotspot) + out-of-band signaling | ✅ | Best path for a *live* nearby session (§7) |
 | **Web NFC** | tap-only, tiny NDEF, Android Chrome only | ❌ | Bootstrap/handoff at most |
@@ -234,7 +235,93 @@ browser. This is the shape of the API, not something we can code around.
 
 ---
 
-## 8. Recommendation & suggested increments
+## 8. Audio (acoustic modem) channel — beeps over the air
+
+An entirely different offline transport: a **software acoustic modem** — one
+phone encodes bits into audible tones and plays them; the other listens through
+its mic and decodes. Exactly how dial-up modems worked. The browser has
+everything for it — `getUserMedia({audio})` for capture, Web Audio
+(`AudioContext` + oscillators / a generated buffer) for playback, and an
+`AnalyserNode` / `AudioWorklet` FFT for the decode — and it **works on iOS
+Safari** (same one-time permission model as the camera; the `AudioContext` just
+has to be started from a user tap). So it clears the platform bar Bluetooth
+failed.
+
+### Modulation: FSK, and the two-band full-duplex idea
+
+- **FSK** (frequency-shift keying): a symbol is a tone at a chosen frequency,
+  held for a fixed slot; the receiver FFTs each slot and reads which frequency
+  won → bits. **MFSK** uses N tones for several bits per symbol (e.g. 16 tones =
+  4 bits/symbol) for more throughput per beep.
+- **Full-duplex via two bands (FDD)** is the right way to do bidirectional:
+  Phone A transmits in a **low band** (~1.5–2.5 kHz) and listens on the high
+  band; Phone B transmits in a **high band** (~3.5–4.5 kHz) and listens on the
+  low band. Each side band-pass-filters to the other's range, so both can beep
+  at once without colliding. Needs a role assignment (who takes which band —
+  e.g. the "share" initiator takes the low band, or lowest device-id wins).
+- **Echo caveat:** each phone hears its *own* speaker loudly in its own mic. Band
+  separation handles most of it (ignore energy in your own TX band); a little
+  acoustic-echo-cancellation, or simply gating the decoder while your own tone
+  plays, covers the rest. Because of this, **start half-duplex** (A sends, B
+  sends a short ACK burst, turn-taking) and treat two-band full-duplex as a v2
+  throughput/latency optimization — one bill is small.
+
+### Band choice & throughput reality
+
+- Stay in the **audible** range phone speakers/mics reproduce well (~**1–6 kHz**).
+  Near-ultrasonic (18–20 kHz, "inaudible") is tempting but phone transducers are
+  weak there and it's flaky; audible is uglier but far more robust.
+- **Realistic robust throughput is ~10–100 bytes/sec.** A ~600-byte compressed
+  bill (the deflate figure from §2) is therefore **~6–15 seconds** of beeping —
+  fine for one bill, slow for a whole trip.
+
+### Reliability — and the op-log makes it easy
+
+The acoustic channel is noisy and bursty, so: a **preamble/sync tone** (start
+detection + gain/timing lock), **forward error correction** (Reed–Solomon is the
+standard here), and a **CRC per packet**. Then the existing model does the rest:
+because `ingestMany` is **idempotent and order-free**, no careful handshake is
+needed — chop the payload into small CRC'd packets and **loop the whole set on a
+carousel**; the receiver collects until it has a complete valid set, then
+imports. Duplicate or out-of-order packets are harmless; the reverse band (or the
+half-duplex ACK) just says "got them all, stop."
+
+### Plugs in the same way
+
+Same seam as QR: `decode → bytes → inflate → ops → log.ingestMany(ops)` → re-fold
+→ render. Reducer, store, and UI untouched.
+
+### Don't hand-roll the DSP — vendor it
+
+Bare FSK is writable, but timing recovery + FEC is the hard 80%. The realistic
+path is to vendor a proven library — **ggwave** (MIT, WASM/JS build, FSK +
+Reed–Solomon, audible *and* ultrasonic profiles, ~100–200 KB) or **Quiet.js**
+(liquid-dsp/libcorrect → WASM). Another dependency, same deliberate call against
+the zero-dep value (`CLAUDE.md`) that the QR decoder already forces.
+
+### The honest catch — where you'd actually use this
+
+siano-next's core scenario is **splitting a bill in a restaurant** — a loud,
+reverberant room, which is exactly where data-over-sound struggles most (SNR is
+the whole ballgame). So audio is a *complementary* channel, not the primary:
+
+| | QR | Audio modem |
+|---|---|---|
+| Speed (one bill) | Instant | ~6–15 s of beeping |
+| Noisy restaurant | Unaffected (it's light) | Degrades badly |
+| Aiming / line-of-sight | Camera pointed at screen | **None — hands-free**, works in a pocket |
+| One-to-many | No (one scan at a time) | **Yes — a table of phones can all listen at once** |
+| Cracked/dirty screen or camera | Fails | Works |
+| Annoyance | Silent | Audible beeping |
+
+**Audio's genuine edge is no aiming and one-to-many broadcast** (one phone beeps
+the bill; every phone at the table picks it up simultaneously — QR can't do
+that). Its weaknesses are speed and the noisy-room problem. For the core use case
+QR is the stronger primary; audio is a compelling optional second channel.
+
+---
+
+## 9. Recommendation & suggested increments
 
 1. **Refactor the transport seam first (small, pure win).** Extract the "which
    ops make up this bill / delta" packaging and the `ingestMany` merge into a
@@ -247,9 +334,13 @@ browser. This is the shape of the API, not something we can code around.
    - a **vendored decoder** + in-PWA camera (`getUserMedia`) — the one new
      dependency (§5),
    - an optional **import-preview** step (UX, not security).
-3. **Add WebRTC-over-local-Wi-Fi later** if a *live* nearby session is wanted —
+3. **Add the audio (acoustic modem) channel (§8) as an optional second path**
+   if hands-free or one-to-many broadcast is wanted — vendor ggwave/Quiet.js,
+   feed decoded bytes into the same packager/`ingestMany` seam, start
+   half-duplex. Complementary to QR, not a replacement (noisy-room caveat).
+4. **Add WebRTC-over-local-Wi-Fi later** if a *live* nearby session is wanted —
    it reuses the QR machinery for signaling and the same op frames.
-4. **Only consider a native Capacitor shell for true Bluetooth** if the web
+5. **Only consider a native Capacitor shell for true Bluetooth** if the web
    paths don't meet the need — an explicit decision to add a build step, not an
    incremental patch.
 
