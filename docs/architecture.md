@@ -79,7 +79,15 @@ time."
 Its only jobs: durably append every op, fan out to connected leaves, and hand a
 returning leaf the delta. **No business logic on the hub** — it literally cannot
 compute a balance. This keeps "all logic in static files on the client" true.
-Two hubs behind one shared log directory would be active-active; one is plenty.
+
+Two hubs can also replicate to **each other**: because ops are content-addressed
++ deduped and the reducer is order-independent, a hub can dial a peer hub and
+speak the very same client sync protocol per trip — it's just a "big leaf." See
+`hub/peer.js` and *Hub-to-hub sync* in docs/security.md. (Sharing one log
+*directory* between two processes is **not** enough for live sync — each hub
+caches a trip in memory and never re-reads the file, so they'd never see each
+other's live appends and could interleave writes; the peer link is the real
+mechanism.)
 
 ## How merge actually works (the reducer)
 
@@ -176,7 +184,10 @@ order-independent convergence), the IndexedDB op-log store, the WebSocket sync
 client, the dependency-free Node hub (fan-out + delta-on-reconnect), and a
 minimal functional board.
 
-**Next** (see `README.md` roadmap): port the reference app's pannable/zoomable
-board and drag-to-split gestures (`assets/js/hooks/*` are largely portable);
-the photo/OCR blob channel; per-device keypair signing of ops; log compaction
-(snapshot + tail) for long-lived trips; a second active-active hub.
+Also built: **hub-to-hub sync** (`hub/peer.js`) — a hub dials a peer and
+replicates a trip's op-log over the client protocol (lazy per-trip, token-authed,
+self-healing on reconnect); tested in `test/peer.test.mjs`.
+
+**Next** (see `README.md` roadmap): the photo/OCR blob channel; per-device
+keypair signing of ops; log compaction (snapshot + tail) for long-lived trips;
+transitive (3+ hub chain) peer relay.

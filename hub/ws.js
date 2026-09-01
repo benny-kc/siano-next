@@ -19,6 +19,12 @@ import { EventEmitter } from "node:events";
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+// Subprotocol a hub-to-hub peer link offers (hub/peer.js). A connection that
+// offers it is marked `conn.isPeer` and exempt from the Origin allowlist — a
+// Node WS client sends no Origin, so it could never pass an allowlist, and peer
+// links are authenticated by a shared token in their `hello` instead (server.js).
+export const PEER_SUBPROTOCOL = "siano-peer";
+
 // Close codes we use (RFC 6455 §7.4.1).
 const CLOSE_PROTOCOL = 1002;
 const CLOSE_POLICY = 1008;
@@ -67,10 +73,18 @@ export class WebSocketServer extends EventEmitter {
     const key = req.headers["sec-websocket-key"];
     if (!key) return this._reject(socket, 400, "Bad Request", "missing Sec-WebSocket-Key");
 
+    // A hub-to-hub peer link offers the `siano-peer` subprotocol; mark it and
+    // exempt it from the Origin allowlist (it's token-authed later, in `hello`).
+    const offered = String(req.headers["sec-websocket-protocol"] || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const isPeer = offered.includes(PEER_SUBPROTOCOL);
+
     // Origin allowlist: browsers always send Origin, so an unexpected or missing
     // Origin from a browser is rejected. (Only enforced when configured, so
-    // non-browser clients still work by default.)
-    if (this.allowedOrigins) {
+    // non-browser clients still work by default. Peer links are exempt.)
+    if (this.allowedOrigins && !isPeer) {
       const origin = req.headers.origin;
       if (!origin || !this.allowedOrigins.has(origin)) {
         return this._reject(socket, 403, "Forbidden", `origin not allowed: ${origin || "(none)"}`);
@@ -82,14 +96,18 @@ export class WebSocketServer extends EventEmitter {
     }
 
     const accept = crypto.createHash("sha1").update(key + GUID).digest("base64");
+    // Echo the peer subprotocol back per RFC 6455 §4.2.2 so the dialing client's
+    // handshake completes; a leaf offers none and gets none.
     socket.write(
       "HTTP/1.1 101 Switching Protocols\r\n" +
         "Upgrade: websocket\r\n" +
         "Connection: Upgrade\r\n" +
+        (isPeer ? `Sec-WebSocket-Protocol: ${PEER_SUBPROTOCOL}\r\n` : "") +
         `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
     );
 
     const conn = new Conn(socket, req, this.maxMessageBytes);
+    conn.isPeer = isPeer;
     this.connections.add(conn);
     conn.on("close", () => this.connections.delete(conn));
     this.emit("connection", conn, req);
