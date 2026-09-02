@@ -159,11 +159,15 @@ Create ops via the `ops.js` constructors (they stamp the clock). Emit them throu
 | `hub/log.js` | `TripLogs`: durable append-only JSONL per trip; async per-trip write queue; op/trip caps; `all`/`missing`/`flush`. |
 | `hub/server.js` | `createHub({...})` factory (returns `{ httpServer, wss, logs, shutdown }`) + static server (env-controlled cache headers + optional asset hashing) + relay + heartbeat + logging + graceful shutdown. Auto-starts when run directly. |
 | `hub/assets.js` | `buildAssets(clientDir)` — in-memory content-hash fingerprinting: rewrites the ESM import graph + `index.html` + service worker to `…<hash>.js` URLs (dependency-ordered; throws on an import cycle). Enabled by `SIANO_ASSET_HASHING`. |
+| `hub/metrics.js` | `Metrics` (lifetime counters the hub bumps) + `render(metrics, live)` — Prometheus text exposition served at `GET /metrics`. **Token-gated (`SIANO_METRICS_TOKEN`), off (404) when unset** — series leak trip ids/volume. Dependency-free; scrape it with Grafana Alloy/Agent → Grafana Cloud (see docs/security.md → *Metrics / monitoring*). |
+| `hub/peer.js` | `createPeers({...})` — **hub-to-hub sync**. A hub *dials* peer hubs (`SIANO_PEER_URL`) and speaks the same client protocol per trip (a hub is "just a big leaf"). Lazy per-trip links (opened on first `hello` for a trip), reconnect/backoff, token auth (`SIANO_PEER_TOKEN`), fan peer ops to LOCAL leaves + forward local-leaf ops to peers. Peer conns offer the `siano-peer` subprotocol (Origin-exempt, rate-limit-exempt). Ops from a peer are never re-forwarded to other peers — dedup keeps a mesh correct but Phase 1 targets 2-hub + star (not a transitive chain). See docs/security.md → *Hub-to-hub sync*. |
 
 **Tests (`test/*.mjs`, `node --test`):** `split`, `money`, `budgets`, `reducer`
 (merge rules + order-independent convergence), `hub` (real WS framing, fan-out,
-delta), `security` (caps, oversized-message close, Origin/trip-id rejection, rate
-limit, headers).
+delta), `peer` (two real hubs: bidirectional hub-to-hub convergence over a single
+dial, durability, token auth), `security` (caps, oversized-message close,
+Origin/trip-id rejection, rate limit, headers), `metrics` (token-gated
+`/metrics`: 404 when off, bearer auth, live + per-trip series).
 
 ---
 
@@ -204,10 +208,11 @@ Full detail in **docs/security.md**. Key points:
 ### Environment variables
 `HOST`, `PORT`, `SIANO_DATA_DIR`, `SIANO_MAX_MSG_BYTES`, `SIANO_MAX_CONNECTIONS`,
 `SIANO_MAX_MSGS_PER_SEC`, `SIANO_ALLOWED_ORIGINS`, `SIANO_MAX_OPS_PER_TRIP`,
-`SIANO_MAX_TRIPS`, `SIANO_HEARTBEAT_MS`, `SIANO_TRIP_ID_MAX`, `SIANO_DEBUG`,
-`SIANO_CLIENT_DEBUG`, `SIANO_ASSET_HASHING`, `SIANO_CACHE_CONTROL`,
-`SIANO_CDN_CACHE_CONTROL`, `SIANO_SW_CACHE_CONTROL`. Defaults + meanings are
-tabled in docs/security.md.
+`SIANO_MAX_TRIPS`, `SIANO_HEARTBEAT_MS`, `SIANO_TRIP_ID_MAX`, `SIANO_PEER_URL`,
+`SIANO_PEER_TOKEN`, `SIANO_METRICS_TOKEN`, `SIANO_DEBUG`, `SIANO_CLIENT_DEBUG`,
+`SIANO_ASSET_HASHING`, `SIANO_CACHE_CONTROL`, `SIANO_CDN_CACHE_CONTROL`,
+`SIANO_SW_CACHE_CONTROL`.
+Defaults + meanings are tabled in docs/security.md.
 
 **Static cache headers are env-controlled** (`hub/server.js`,
 `resolveCacheConfig`). Default is `no-cache` everywhere (dev: revalidate always,
@@ -355,7 +360,14 @@ keep them fixed.
 - **Per-device keypair signing of ops** (tamper-evidence + authorship; trip URL
   stays the capability).
 - **Log compaction** (snapshot + tail) for long-lived trips — also bounds disk.
-- **Second active-active hub** behind the shared log dir.
+- **Multi-hub sync** ✅ *(Phase 1 done)* — `hub/peer.js`: a hub dials a peer
+  (`SIANO_PEER_URL`) and replicates a trip's op-log over the client protocol
+  (lazy per-trip, token-authed via `SIANO_PEER_TOKEN`, self-healing). Covers
+  two hubs (single dial is bidirectional) and a star (spokes → one hub). Next:
+  transitive relay across a 3+ hub chain, and a shared-secret/Access story for
+  federating hubs you don't both operate. (NB: sharing one log *directory*
+  between hubs is **not** live sync — each caches trips in memory; the peer link
+  is the mechanism.)
 
 ---
 

@@ -41,7 +41,8 @@ What a Cloudflare Tunnel gives you, and what it doesn't:
 | **Static server** | GET/HEAD only (else `405`); path-traversal blocked (resolved path must stay under the client dir); a `/healthz` endpoint for probes. |
 | **Cache freshness** | Static responses carry a configurable `Cache-Control` **+ `CDN-Cache-Control`** with a strong `ETag`; conditional GETs return `304`. Default (`no-cache`) makes browser and CDN revalidate every load, so a new release shows up at once — ideal for development. For production, `SIANO_ASSET_HASHING=1` serves content-hashed asset URLs so they cache forever with **no purge** on deploy (only the tiny `no-cache` shell + service worker revalidate). The **service worker** has its own knob (`SIANO_SW_CACHE_CONTROL`, default `no-cache`) and stays fresh regardless, because a cached SW never updates and its cache-first shell would serve the old UI forever. `/env.js` is always `no-store`. |
 | **Security headers** | A tight `Content-Security-Policy` (`default-src 'self'`, same-origin scripts, WebSocket only back to origin, no third-party anything), plus `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and a minimal `Permissions-Policy`. |
-| **Origin allowlist** | Optional `SIANO_ALLOWED_ORIGINS` (comma-separated). When set, WebSocket upgrades from any other `Origin` (or none, from a browser) are rejected `403` — defeats cross-site WebSocket hijacking if a trip URL ever leaks. |
+| **Origin allowlist** | Optional `SIANO_ALLOWED_ORIGINS` (comma-separated). When set, WebSocket upgrades from any other `Origin` (or none, from a browser) are rejected `403` — defeats cross-site WebSocket hijacking if a trip URL ever leaks. Hub-to-hub peer links (below) are exempt — they carry no `Origin` and authenticate by token instead. |
+| **Hub-to-hub auth** | Optional `SIANO_PEER_URL`/`SIANO_PEER_TOKEN` (see [Hub-to-hub sync](#hub-to-hub-sync)). A peer link offers the `siano-peer` subprotocol and presents the shared token in its `hello`; a mismatch is closed `1008`. Peer links are rate-limit-exempt (they relay a whole trip's traffic), so **only enable them between hubs you operate** — a peer can inject ops into every replicated trip (per-op signing is still a roadmap item). |
 | **Graceful shutdown** | `SIGINT`/`SIGTERM` stop the heartbeat, close all sockets (`1001`), stop accepting, and flush pending writes. |
 
 ## Environment knobs
@@ -59,10 +60,13 @@ What a Cloudflare Tunnel gives you, and what it doesn't:
 | `SIANO_MAX_TRIPS` | `0` (∞) | Refuse creating new trip files past this many. **Set one if trip creation is unauthenticated.** |
 | `SIANO_HEARTBEAT_MS` | `30000` | Ping/reap interval. |
 | `SIANO_TRIP_ID_MAX` | `128` | Max trip-id length. |
+| `SIANO_PEER_URL` | *(unset)* | Comma-separated `ws://`/`wss://` URLs of peer hubs to **dial** for hub-to-hub sync (see [Hub-to-hub sync](#hub-to-hub-sync)). Off when unset. |
+| `SIANO_PEER_TOKEN` | *(unset)* | Shared secret a dialing peer presents and a receiving hub checks. **Set the same value on both hubs.** Unset ⇒ peer links are accepted with a loud warning. |
 | `SIANO_ASSET_HASHING` | *(off)* | When on (`1`/`true`), serve the JS/CSS/manifest at **content-hashed URLs** (`/js/app.<hash>.js`) computed in memory at startup — the ESM import graph, `index.html` and the service worker are rewritten to match. Hashed URLs change when the bytes do, so they can be cached forever and a new release is picked up **without a purge**. Flips the asset default to `immutable` (below). Source files on disk are untouched — still buildless. |
 | `SIANO_CACHE_CONTROL` | `no-cache` *(→ `public, max-age=31536000, immutable` when `SIANO_ASSET_HASHING` is on)* | `Cache-Control` for static assets. Default `no-cache` = store but always revalidate (dev-friendly; a Cloudflare purge always suffices); with hashing on the default is `immutable`. Set it explicitly for a custom policy, e.g. `public, max-age=300`. Empty (`SIANO_CACHE_CONTROL=`) omits the header so Cloudflare uses its extension defaults. The HTML shell is `no-cache` whenever hashing is on (it names the current hashed URLs). |
 | `SIANO_CDN_CACHE_CONTROL` | *(= `SIANO_CACHE_CONTROL`)* | `CDN-Cache-Control` — the CDN-scoped directive Cloudflare honours independently of the browser's `Cache-Control`. Defaults to the same value; set it to cache at the edge while telling browsers something else. Empty omits it. |
 | `SIANO_SW_CACHE_CONTROL` | `no-cache` | `Cache-Control` (and `CDN-Cache-Control`) for `/service-worker.js` only. Keep it `no-cache` — a cached service worker never updates, so its cache-first shell serves the old UI forever. Its own knob so you can cache everything else aggressively in production. |
+| `SIANO_METRICS_TOKEN` | *(unset)* | Bearer token that gates `GET /metrics` (Prometheus text format). **Unset ⇒ the endpoint is OFF (404)** — the series leak trip ids and activity volume, so it must never be open. Set it and a scraper (e.g. Grafana Alloy/Agent → Grafana Cloud) presents `Authorization: Bearer <token>`. Keep the hub loopback-bound; the token defends against other localhost processes / a misconfigured tunnel. |
 | `SIANO_DEBUG` | *(off)* | Verbose **hub** logging (per-request/per-op; op type + ids only, never payloads). Troubleshooting only. |
 | `SIANO_CLIENT_DEBUG` | *(off)* | Verbose **client** logging. The hub injects the flag via `/env.js`; there is no user-facing switch, so end users never see logs. Flip it and restart to enable, then reload the client. |
 
@@ -90,6 +94,103 @@ node hub/server.js
 
 (Or, without hashing, set `SIANO_CACHE_CONTROL="public, max-age=300"` for a short
 edge TTL — simpler, but then purge on each deploy or wait out the TTL.)
+
+## Metrics / monitoring
+
+Grafana + Prometheus is far too heavy to *run* next to a single loopback-bound
+Node relay, so the hub instead **exposes** metrics in the Prometheus text format
+and lets something small collect them. `GET /metrics` (in `hub/server.js`, series
+built by `hub/metrics.js`) reports live gauges (`siano_ws_connections`,
+`siano_trips_active`, per-trip `siano_trip_connections`/`siano_trip_ops`),
+lifetime counters (`siano_ops_appended_total`, `siano_ops_rejected_total`,
+`siano_ws_upgrade_rejected_total{reason=…}`, `siano_rate_limit_closes_total`, …)
+and a couple of process gauges — no dependencies, nothing to build.
+
+The endpoint is **token-gated and off by default**: with no `SIANO_METRICS_TOKEN`
+it returns `404`. The per-trip series carry trip ids and activity volume, and the
+hub has no auth (the trip URL is the capability), so it must sit behind the token
+even on loopback. A scrape is `no-store` (never cached) and needs
+`Authorization: Bearer <token>`:
+
+```bash
+curl -H "Authorization: Bearer $SIANO_METRICS_TOKEN" http://127.0.0.1:4000/metrics
+```
+
+**Grafana Cloud free tier** is the visualiser that stays proportionate: don't host
+Grafana yourself — run **Grafana Alloy** (or the older Grafana Agent) on the hub
+host, have it scrape `127.0.0.1:4000/metrics` with the bearer token, and
+`remote_write` to your Grafana Cloud stack. No inbound port, no local TSDB. A
+minimal Alloy scrape:
+
+```alloy
+prometheus.scrape "siano" {
+  targets    = [{ __address__ = "127.0.0.1:4000" }]
+  metrics_path = "/metrics"
+  scrape_interval = "30s"
+  bearer_token = sys.env("SIANO_METRICS_TOKEN")
+  forward_to = [prometheus.remote_write.grafanacloud.receiver]
+}
+prometheus.remote_write "grafanacloud" {
+  endpoint {
+    url = "https://prometheus-prod-XX.grafana.net/api/prom/push"
+    basic_auth { username = "<instance-id>"  password = sys.env("GRAFANA_CLOUD_TOKEN") }
+  }
+}
+```
+
+(Prefer `siano_ops_appended_total` per-trip for activity, `siano_ws_connections`
+for concurrency, and alert on `siano_up` disappearing or
+`siano_rate_limit_closes_total` climbing. For pure uptime alerting, Uptime Kuma
+hitting `/healthz` is even lighter and needs no token.)
+
+## Hub-to-hub sync
+
+Two (or more) hubs can replicate a trip's op-log to each other so travellers who
+happen to connect to *different* hubs for the *same* trip still converge. It's a
+thin add-on to the existing relay: a hub **dials** its peer and speaks the exact
+client sync protocol (`hello`/`sync`/`want`, then live `op`/`ops`), per trip.
+Nothing new is needed on the merge side — ops are content-addressed and deduped
+and the reducer is order-independent, so a peer link is just a "big leaf" that
+happens to be another hub. See `hub/peer.js` and the architecture doc.
+
+- **How to turn it on.** For two hubs, set on **one** of them:
+  ```bash
+  SIANO_PEER_URL="wss://other-hub.example.com" \
+  SIANO_PEER_TOKEN="a-long-random-shared-secret" \
+  node hub/server.js
+  ```
+  and set the **same** `SIANO_PEER_TOKEN` on the other hub (it only needs the
+  token — it doesn't have to dial back; a single dial is bidirectional). For a
+  fan-out of many hubs, point several **spoke** hubs' `SIANO_PEER_URL` at one
+  central hub; the central hub relays between them through its ordinary room
+  fan-out and needs no peer URL of its own (just the shared token).
+- **Lazy per-trip.** A link for a trip opens the first time a local device joins
+  that trip, so a trip replicates across hubs exactly when it's actually used on
+  both — and a hub never blindly pulls every trip from its peer.
+- **Self-healing.** The link reconnects with backoff and re-runs the two-way
+  delta on every reconnect, so a flaky inter-hub network loses nothing (same
+  guarantee as an offline phone).
+
+**Trust boundary — read this.** A peer link widens trust from "anyone with the
+trip URL" to "the operator of the peer hub": an authenticated peer can inject
+ops into *every* replicated trip, and those ops are not individually signed yet
+(per-device op signing is still a roadmap item). So:
+
+- **Only link hubs you operate.** Do not federate with a hub you don't control.
+- **Always set `SIANO_PEER_TOKEN`** (a long random secret) on both hubs. Without
+  it, any client that offers the `siano-peer` subprotocol is accepted as a hub —
+  the process logs a loud warning once when that happens.
+- **Use `wss://` (TLS)** for the inter-hub link — put the peer behind the same
+  Cloudflare Tunnel / TLS you use for browsers; if the peer sits behind
+  Cloudflare Access, the dialing hub needs an Access **service token** to reach
+  it.
+- Peer links are **exempt from the per-connection rate limit** (they relay a
+  whole trip's traffic) — another reason the token, and operating both ends,
+  matter.
+
+Topology note: Phase 1 covers **two hubs** (either/both directions) and a
+**star** (spokes → one hub). A 3+ hub *chain* does not relay transitively yet
+(dedup keeps a full mesh correct, just chattier); prefer a star.
 
 ## Deployment-level hardening (do these too)
 

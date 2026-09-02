@@ -126,6 +126,17 @@ export class TripLogs {
     return [...this._load(trip).values()];
   }
 
+  /**
+   * Per-trip op counts for trips currently held in memory (metrics only — does
+   * not touch disk, so it reflects trips this hub has actually served this run).
+   * @returns {Map<string, number>} trip -> ops in memory.
+   */
+  opCounts() {
+    const out = new Map();
+    for (const [trip, map] of this.mem) out.set(trip, map.size);
+    return out;
+  }
+
   /** The ops this trip has that the caller (who lists `have` op-ids) is missing. */
   missing(trip, have) {
     const set = new Set(Array.isArray(have) ? have : []);
