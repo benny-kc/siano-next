@@ -143,6 +143,12 @@ for concurrency, and alert on `siano_up` disappearing or
 `siano_rate_limit_closes_total` climbing. For pure uptime alerting, Uptime Kuma
 hitting `/healthz` is even lighter and needs no token.)
 
+An importable Grafana dashboard for all of the above lives at
+[`ops/grafana/siano-hub-dashboard.json`](../ops/grafana/siano-hub-dashboard.json)
+(Dashboards → New → Import → pick your Prometheus data source); see
+[`ops/grafana/README.md`](../ops/grafana/README.md) for the panel list and a few
+suggested alerts.
+
 ## Hub-to-hub sync
 
 Two (or more) hubs can replicate a trip's op-log to each other so travellers who
