@@ -14,9 +14,41 @@ It works with **Grafana Cloud (free tier)** fed by Grafana Alloy/Agent
 3. When prompted, pick your **Prometheus** data source (the one Alloy writes to)
    for the `DS_PROMETHEUS` input, then **Import**.
 
-The dashboard has `job`, `instance` and `trip` template variables at the top
-(all default to *All*), so it works whether you run one hub or several, and lets
-you drill into a single trip in the *Per-trip* row.
+The dashboard has `hub`, `job`, `instance` and `trip` template variables at the
+top (all default to *All*), so it works whether you run one hub or several, and
+lets you filter to a single hub or drill into a single trip.
+
+## Two (or more) hubs on one dashboard
+
+Point **both** hubs' Grafana Alloy/Agent at the **same** Prometheus / Grafana
+Cloud stack (one data source). The catch: if each Alloy scrapes its local hub at
+`127.0.0.1:4000`, every series arrives with identical `job`/`instance` labels and
+the two hubs are indistinguishable (their remote-writes even collide). Give each
+hub a unique **`hub`** label via `external_labels` on its `remote_write`:
+
+```alloy
+// on hub A's host
+prometheus.remote_write "grafanacloud" {
+  external_labels = { hub = "hub-a" }        // hub = "hub-b" on the other host
+  endpoint {
+    url = "https://prometheus-prod-XX.grafana.net/api/prom/push"
+    basic_auth { username = "<instance-id>"  password = sys.env("GRAFANA_CLOUD_TOKEN") }
+  }
+}
+```
+
+The dashboard is built around that `hub` label:
+
+- **Fleet overview** — stat tiles `sum(...)` across all selected hubs (totals).
+- **Per-hub health** — one tile per hub for status / uptime / connections.
+- **Traffic, Errors, Process** — every time series is `sum by (hub) (...)` with a
+  `{{hub}}` legend, so each hub is its own line.
+- **Per-trip** — merged across hubs by `trip` (a trip peer-synced to both hubs is
+  summed), so you see total activity per trip regardless of which hub served it.
+
+Use the **Hub** dropdown to focus on one hub or compare a subset. (No `hub` label
+yet? Everything still loads — the per-hub breakouts just collapse to a single
+unlabeled series until you add it.)
 
 ## What's on it
 
