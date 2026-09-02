@@ -20,17 +20,19 @@
 //
 // Env (all optional): HOST, PORT, SIANO_DATA_DIR, SIANO_MAX_MSG_BYTES,
 //   SIANO_MAX_CONNECTIONS, SIANO_MAX_MSGS_PER_SEC, SIANO_ALLOWED_ORIGINS,
-//   SIANO_MAX_OPS_PER_TRIP, SIANO_MAX_TRIPS, SIANO_HEARTBEAT_MS, SIANO_TRIP_ID_MAX.
+//   SIANO_MAX_OPS_PER_TRIP, SIANO_MAX_TRIPS, SIANO_HEARTBEAT_MS, SIANO_TRIP_ID_MAX,
+//   SIANO_METRICS_TOKEN (gates GET /metrics; off when unset).
 
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WebSocketServer } from "./ws.js";
 import { TripLogs, isValidOp } from "./log.js";
 import { buildAssets } from "./assets.js";
 import { createPeers } from "./peer.js";
+import { Metrics, render as renderMetrics } from "./metrics.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIR = path.resolve(__dirname, "../client");
@@ -179,6 +181,18 @@ function setCacheHeaders(res, cfg, tag, etag) {
 
 const etagOf = (data) => `"${createHash("sha1").update(data).digest("base64")}"`;
 
+// Constant-time check of an `Authorization: Bearer <token>` header against the
+// configured metrics token. Length is compared first (timingSafeEqual throws on
+// a length mismatch), so a wrong-length guess is rejected without leaking timing.
+function bearerOk(req, token) {
+  const h = req.headers["authorization"] || "";
+  const m = /^Bearer\s+(.+)$/i.exec(h);
+  if (!m) return false;
+  const a = Buffer.from(m[1]);
+  const b = Buffer.from(token);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 // Serve one buffer with the right cache tag + conditional-GET (304) support.
 function sendBuffer(req, res, cfg, tag, servedPath, buf) {
   const etag = etagOf(buf);
@@ -189,8 +203,10 @@ function sendBuffer(req, res, cfg, tag, servedPath, buf) {
 }
 
 // Build the static-file handler bound to a resolved cache config and, when asset
-// hashing is enabled, the in-memory fingerprinted assets (else `null`).
-function makeServeStatic(cfg, assets) {
+// hashing is enabled, the in-memory fingerprinted assets (else `null`). `metrics`
+// is a late-bound context `{ token, render }` — `render` is set once the hub's
+// live state (wss/rooms/logs) exists; a request reads it at scrape time.
+function makeServeStatic(cfg, assets, metrics) {
   return function serveStatic(req, res) {
     setSecurityHeaders(res);
 
@@ -203,6 +219,21 @@ function makeServeStatic(cfg, assets) {
     debug(`http ${req.method} ${url.pathname} from ${clientIp(req)}`);
     if (url.pathname === "/healthz") {
       res.writeHead(200, { "content-type": "text/plain" }).end("ok");
+      return;
+    }
+    // Prometheus scrape endpoint. OFF unless SIANO_METRICS_TOKEN is set — the
+    // series leak trip ids + activity volume, so an unauthed hub must not expose
+    // them (404, indistinguishable from the route not existing). With a token,
+    // require `Authorization: Bearer <token>`; a miss is 401 with no body.
+    if (url.pathname === "/metrics") {
+      if (!metrics?.token) { res.writeHead(404, { "content-type": "text/plain" }).end("not found"); return; }
+      if (!bearerOk(req, metrics.token)) {
+        res.writeHead(401, { "content-type": "text/plain", "www-authenticate": "Bearer" }).end("unauthorized");
+        return;
+      }
+      const body = metrics.render ? metrics.render() : "";
+      res.writeHead(200, { "content-type": "text/plain; version=0.0.4; charset=utf-8", "cache-control": "no-store" });
+      res.end(req.method === "HEAD" ? undefined : body);
       return;
     }
     // Operator-controlled client debug flag. Never cached, so flipping
@@ -301,6 +332,13 @@ export function createHub(opts = {}) {
     .split(",").map((s) => s.trim()).filter(Boolean);
   const peerToken = opts.peerToken ?? process.env.SIANO_PEER_TOKEN ?? "";
 
+  // Prometheus metrics: a bearer token gates GET /metrics; empty ⇒ endpoint off.
+  const metricsToken = opts.metricsToken ?? process.env.SIANO_METRICS_TOKEN ?? "";
+  const metrics = new Metrics();
+  // Late-bound context handed to the static handler; `render` is wired once the
+  // live state (wss/rooms/logs) below exists.
+  const metricsCtx = { token: metricsToken, render: null };
+
   const logs = new TripLogs(path.join(dataDir, "logs"), {
     maxOpsPerTrip: opts.maxOpsPerTrip ?? num(process.env.SIANO_MAX_OPS_PER_TRIP, 0),
     maxTrips: opts.maxTrips ?? num(process.env.SIANO_MAX_TRIPS, 0),
@@ -325,7 +363,7 @@ export function createHub(opts = {}) {
     }
   }
   const cacheCfg = resolveCacheConfig(opts, !!assets);
-  const httpServer = http.createServer(makeServeStatic(cacheCfg, assets));
+  const httpServer = http.createServer(makeServeStatic(cacheCfg, assets, metricsCtx));
   // Slowloris / stuck-request guards (belt-and-braces behind Cloudflare).
   httpServer.headersTimeout = 15000;
   httpServer.requestTimeout = 30000;
@@ -358,14 +396,24 @@ export function createHub(opts = {}) {
 
   const wss = new WebSocketServer(httpServer, { maxMessageBytes, maxConnections, allowedOrigins });
 
+  // Now that the live state exists, wire the metrics scrape to sample it.
+  metricsCtx.render = () => renderMetrics(metrics, {
+    connections: wss.connections.size,
+    rooms,
+    opCounts: logs.opCounts(),
+    tripsOnDisk: logs.tripCount,
+  });
+
   // Log every refused upgrade — this is where "why can't anyone connect?"
   // usually gets answered (Origin allowlist, connection cap, bad request).
   wss.on("reject", ({ status, reason, detail, origin }) => {
+    metrics.upgradeReject(reason);
     warn(`ws upgrade rejected ${status} ${reason}${detail ? " — " + detail : ""}${origin ? " (origin " + origin + ")" : ""}`);
   });
 
   wss.on("connection", (conn, req) => {
     conn.ip = clientIp(req);
+    metrics.wsOpened += 1;
     debug(`ws open from ${conn.ip} (origin ${req.headers.origin || "none"}); ${wss.connections.size} live`);
 
     conn.on("message", async (data) => {
@@ -373,6 +421,7 @@ export function createHub(opts = {}) {
       // per-connection rate limit meant for a single device — exempt them (they
       // are authenticated by token in `hello`).
       if (!conn.isPeer && !allow(conn)) {
+        metrics.rateLimitCloses += 1;
         warn(`ws rate limit hit (${maxMsgsPerSec}/s) trip=${conn.trip || "?"} ip=${conn.ip} — closing 1008`);
         conn.close(1008); // policy violation — too chatty
         return;
@@ -382,10 +431,12 @@ export function createHub(opts = {}) {
       try {
         msg = JSON.parse(data);
       } catch {
+        metrics.badJson += 1;
         debug(`ws bad JSON (${data.length} bytes) from ${conn.ip} — ignored`);
         return;
       }
       if (!msg || typeof msg !== "object") return;
+      metrics.messages += 1;
 
       if (msg.t === "hello") {
         // A peer hub (offered the `siano-peer` subprotocol) is authenticated by
@@ -436,6 +487,7 @@ export function createHub(opts = {}) {
 
       if (msg.t === "op" && isValidOp(msg.op)) {
         if (await logs.append(conn.trip, msg.op)) {
+          metrics.appended(conn.trip);
           debug(`ws op trip=${conn.trip} ${opBrief(msg.op)} -> fanout`);
           fanout(conn.trip, { t: "op", op: msg.op }, conn);
           // Forward a local leaf's op to peer hubs. Skip ops that arrived FROM a
@@ -443,12 +495,14 @@ export function createHub(opts = {}) {
           // not bounce back to their origin hub.
           if (!conn.isPeer) peers.broadcast(conn.trip, { t: "op", op: msg.op });
         } else {
+          metrics.rejected();
           debug(`ws op trip=${conn.trip} ${opBrief(msg.op)} -> dup/capped (no fanout)`);
         }
       } else if (msg.t === "ops" && Array.isArray(msg.ops)) {
         const added = [];
         for (const op of msg.ops) {
-          if (isValidOp(op) && (await logs.append(conn.trip, op))) added.push(op);
+          if (isValidOp(op) && (await logs.append(conn.trip, op))) { metrics.appended(conn.trip); added.push(op); }
+          else metrics.rejected();
         }
         debug(`ws ops trip=${conn.trip} received=${msg.ops.length} new=${added.length}`);
         if (added.length) {
@@ -462,6 +516,7 @@ export function createHub(opts = {}) {
 
     conn.on("close", () => {
       leave(conn);
+      metrics.wsClosed += 1;
       debug(`ws close trip=${conn.trip || "?"} ip=${conn.ip}; ${wss.connections.size} live`);
     });
   });
@@ -527,6 +582,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
     log(`  asset hashing: ${hub.assets ? `on (${hub.assets.count} fingerprinted — cache immutable, no purge needed)` : "off (set SIANO_ASSET_HASHING=1)"}`);
     log(`  static cache: assets="${show(cc.asset)}" cdn="${show(cc.cdn)}" sw="${show(cc.sw)}"` +
       `${!hub.assets && cc.asset === "no-cache" ? " (dev default — revalidate always)" : ""}`);
+    log(`  metrics    : ${process.env.SIANO_METRICS_TOKEN ? "on — GET /metrics (Bearer token) for Prometheus/Grafana" : "off (set SIANO_METRICS_TOKEN to expose /metrics)"}`);
     log(`  debug logs : ${DEBUG ? "on" : "off (set SIANO_DEBUG=1 for per-request/op logs)"}`);
     if (HOST === "127.0.0.1" || HOST === "localhost") {
       // The bind default changed to loopback during hardening. If cloudflared
