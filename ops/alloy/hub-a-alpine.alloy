@@ -1,0 +1,64 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Grafana Alloy config — HUB A (Alpine Linux host).
+//
+// One Alloy per host. It scrapes (1) the machine via the built-in node_exporter
+// and (2) the local Siano hub's /metrics, then remote_writes BOTH to Grafana
+// Cloud, stamping a unique `hub` label so the two machines stay distinguishable
+// on one dashboard.
+//
+// Expected environment (e.g. /etc/conf.d/alloy or the service env):
+//   GRAFANA_CLOUD_PROM_URL   https://prometheus-prod-XX.grafana.net/api/prom/push
+//   GRAFANA_CLOUD_USER       your metrics instance id
+//   GRAFANA_CLOUD_TOKEN      a Grafana Cloud access policy token (metrics:write)
+//   SIANO_METRICS_TOKEN      the hub's SIANO_METRICS_TOKEN (bearer for /metrics)
+//
+// Alpine notes:
+//   - Install Alloy from the static binary or apk; run it under OpenRC.
+//   - node_exporter is embedded in Alloy — nothing else to install.
+//   - Schedule the log-size script from busybox crond:
+//       */2 * * * * /opt/siano/ops/alloy/siano-logsize.sh
+//   - Create the textfile dir once: mkdir -p /var/lib/node_exporter/textfile_collector
+// ─────────────────────────────────────────────────────────────────────────────
+
+// (1) Host metrics: CPU, memory, disk/filesystem, load, network + textfile.
+prometheus.exporter.unix "host" {
+  // Keep only real filesystems; drop pseudo/virtual mounts so `/` stands out.
+  filesystem {
+    fs_types_exclude     = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|tmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|ramfs|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+    mount_points_exclude = "^/(dev|proc|run/credentials/.+|sys|var/lib/docker/.+)($|/)"
+    mount_timeout        = "5s"
+  }
+  // App log-file sizes land here as siano_logfile_bytes / siano_logdir_bytes.
+  textfile {
+    directory = "/var/lib/node_exporter/textfile_collector"
+  }
+}
+
+prometheus.scrape "host" {
+  targets         = prometheus.exporter.unix.host.targets
+  forward_to      = [prometheus.remote_write.grafanacloud.receiver]
+  scrape_interval = "30s"
+  job_name        = "node"
+}
+
+// (2) Siano hub app metrics (token-gated /metrics on loopback).
+prometheus.scrape "siano_hub" {
+  targets         = [{ __address__ = "127.0.0.1:4000", instance = "hub-a" }]
+  metrics_path    = "/metrics"
+  bearer_token    = sys.env("SIANO_METRICS_TOKEN")
+  forward_to      = [prometheus.remote_write.grafanacloud.receiver]
+  scrape_interval = "30s"
+  job_name        = "siano-hub"
+}
+
+// (3) Single remote_write; stamp hub + os on EVERYTHING this host sends.
+prometheus.remote_write "grafanacloud" {
+  external_labels = { hub = "hub-a", os = "alpine" }
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_PROM_URL")
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+}

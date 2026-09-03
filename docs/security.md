@@ -149,6 +149,13 @@ An importable Grafana dashboard for all of the above lives at
 [`ops/grafana/README.md`](../ops/grafana/README.md) for the panel list and a few
 suggested alerts.
 
+**Host / OS metrics** (CPU, memory, disk-free on `/`, load, app log-file sizes)
+are collected by the **same Alloy agent** via its built-in `prometheus.exporter.unix`
+(node_exporter) — no extra daemon and no Node code — plus a tiny textfile-collector
+script for per-file log sizes. Configs for both hosts (Alpine + Ubuntu) and setup
+steps are in [`ops/alloy/`](../ops/alloy/README.md); the dashboard's *Host machines*
+row renders them, joined to the app metrics by the `hub` label.
+
 ## Hub-to-hub sync
 
 Two (or more) hubs can replicate a trip's op-log to each other so travellers who
