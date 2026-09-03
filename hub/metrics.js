@@ -30,6 +30,17 @@ export class Metrics {
     this.opsRejected = 0; // ops refused: duplicate or hit a cap
     this.upgradeRejected = new Map(); // reason -> count (Origin, cap, bad request…)
     this.tripAppended = new Map(); // trip -> ops appended (per-trip counter)
+    // Hub-to-hub (peer) sync — the dialer side counters, keyed by peer URL, plus
+    // the acceptor-side auth-failure count. Link up/down is sampled live (gauges).
+    this.peerConnects = new Map(); // peer url -> successful dials
+    this.peerDisconnects = new Map(); // peer url -> link closures (→ reconnect)
+    this.peerOpsIn = new Map(); // peer url -> ops ingested FROM the peer
+    this.peerOpsOut = new Map(); // peer url -> ops forwarded TO the peer
+    this.peerAuthFailures = 0; // inbound peer conns rejected for a bad token
+  }
+
+  _bump(map, key, n = 1) {
+    map.set(key, (map.get(key) || 0) + n);
   }
 
   /** One op accepted into `trip`'s log. */
@@ -45,9 +56,18 @@ export class Metrics {
 
   /** A WebSocket upgrade refused, tallied by reason. */
   upgradeReject(reason) {
-    const r = reason || "unknown";
-    this.upgradeRejected.set(r, (this.upgradeRejected.get(r) || 0) + 1);
+    this._bump(this.upgradeRejected, reason || "unknown");
   }
+
+  // Peer (hub-to-hub) events, all keyed by the peer hub's URL. NB the method
+  // names differ from the Map field names (peerOpsIn/peerOpsOut) on purpose — an
+  // instance field would shadow a same-named prototype method.
+  peerConnect(url) { this._bump(this.peerConnects, url); }
+  peerDisconnect(url) { this._bump(this.peerDisconnects, url); }
+  peerRecvOps(url, n) { if (n) this._bump(this.peerOpsIn, url, n); }
+  peerSentOps(url, n) { if (n) this._bump(this.peerOpsOut, url, n); }
+  /** An inbound peer connection rejected for presenting the wrong token. */
+  peerAuthFail() { this.peerAuthFailures += 1; }
 }
 
 // Prometheus label values escape backslash, double-quote and newline. Trip ids
@@ -109,6 +129,31 @@ export function render(m, live) {
   // Process gauges (handy without a node_exporter alongside).
   emit("siano_process_resident_memory_bytes", "gauge", "Resident set size.", one(mem.rss));
   emit("siano_process_heap_used_bytes", "gauge", "V8 heap in use.", one(mem.heapUsed));
+
+  // Peer (hub-to-hub) sync. `live.peer` is sampled from the peer manager +
+  // acceptor at scrape time; the counters below accumulate over the run. On a hub
+  // with no peering configured, only siano_peer_configured (0) is emitted.
+  const peer = live.peer || { configured: 0, inbound: 0, links: [] };
+  emit("siano_peer_configured", "gauge", "Peer hub URLs this hub is configured to dial.", one(peer.configured || 0));
+  emit("siano_peer_inbound_connections", "gauge", "Inbound peer-hub connections currently accepted.", one(peer.inbound || 0));
+  const plinks = peer.links || [];
+  if (plinks.length) {
+    const lbl = (l) => `{peer="${esc(l.peer)}"}`;
+    emit("siano_peer_link_up", "gauge", "1 if at least one per-trip link to this peer hub is open, else 0.",
+      plinks.map((l) => [lbl(l), l.open > 0 ? 1 : 0]));
+    emit("siano_peer_links_open", "gauge", "Per-trip links to this peer hub currently OPEN.",
+      plinks.map((l) => [lbl(l), l.open]));
+    emit("siano_peer_links_total", "gauge", "Per-trip links to this peer hub created (open or reconnecting).",
+      plinks.map((l) => [lbl(l), l.total]));
+  }
+  const peerCounter = (name, help, map) => {
+    if (map.size) emit(name, "counter", help, [...map].map(([p, n]) => [`{peer="${esc(p)}"}`, n]));
+  };
+  peerCounter("siano_peer_connects_total", "Successful dials to a peer hub.", m.peerConnects);
+  peerCounter("siano_peer_disconnects_total", "Peer-hub link closures that triggered a reconnect.", m.peerDisconnects);
+  peerCounter("siano_peer_ops_in_total", "Ops ingested from a peer hub.", m.peerOpsIn);
+  peerCounter("siano_peer_ops_out_total", "Ops forwarded to a peer hub.", m.peerOpsOut);
+  emit("siano_peer_auth_failures_total", "counter", "Inbound peer connections rejected for a bad token.", one(m.peerAuthFailures));
 
   // Per-trip series. The set of trips is the union of those with live rooms,
   // those loaded in memory, and those we've appended to this run.
