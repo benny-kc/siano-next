@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import { createHub } from "../hub/server.js";
-import { Clock } from "../client/js/core/lamport.js";
+import { Clock, opId } from "../client/js/core/lamport.js";
 import * as ops from "../client/js/core/ops.js";
 
 function tmpDir() {
@@ -49,6 +49,24 @@ function next(ws, predicate) {
       }
     });
   });
+}
+function collectOps(ws, wantIds) {
+  const want = new Set(wantIds);
+  const got = new Map();
+  return new Promise((resolve, reject) => {
+    const to = setTimeout(() => reject(new Error("timed out collecting ops")), 4000);
+    ws.addEventListener("message", function handler(ev) {
+      const msg = JSON.parse(ev.data);
+      const batch = msg.op ? [msg.op] : Array.isArray(msg.ops) ? msg.ops : [];
+      for (const o of batch) if (want.has(opId(o))) got.set(opId(o), o);
+      if ([...want].every((id) => got.has(id))) {
+        clearTimeout(to); ws.removeEventListener("message", handler); resolve(got);
+      }
+    });
+  });
+}
+function listenOn(hub) {
+  return new Promise((r) => hub.httpServer.listen(0, "127.0.0.1", () => r(hub.httpServer.address().port)));
 }
 
 test("/metrics is 404 (off) when no token is configured", async (t) => {
@@ -93,6 +111,57 @@ test("/metrics reports live connections and per-trip series", async (t) => {
   assert.match(r.body, new RegExp(`^siano_trip_ops_appended_total\\{trip="${trip}"\\} 2$`, "m"));
 
   ws.close();
+});
+
+test("peer metrics: link up + ops in/out on the dialer, inbound conn on the acceptor", async (t) => {
+  // Hub A accepts peers; hub B dials A. Both expose /metrics.
+  const dirA = tmpDir(), dirB = tmpDir();
+  const hubA = createHub({ dataDir: dirA, metricsToken: "tok" });
+  const portA = await listenOn(hubA);
+  const hubB = createHub({ dataDir: dirB, metricsToken: "tok", peerUrls: [`ws://127.0.0.1:${portA}`] });
+  const portB = await listenOn(hubB);
+  t.after(async () => {
+    await hubB.shutdown(); await hubA.shutdown();
+    fs.rmSync(dirA, { recursive: true, force: true });
+    fs.rmSync(dirB, { recursive: true, force: true });
+  });
+
+  const trip = "trip-peer-metrics";
+  const A = new Clock("A");
+  const wsA = await open(`ws://127.0.0.1:${portA}`);
+  wsA.send(JSON.stringify({ t: "hello", trip, have: [] }));
+  await next(wsA, (m) => m.t === "sync");
+  const op1 = ops.setTripName(A, "Rome");
+  wsA.send(JSON.stringify({ t: "op", op: op1 }));
+
+  // A leaf joining hub B lazily opens B's peer link to A and pulls op1 down
+  // (an ops_in on B).
+  const wsB = await open(`ws://127.0.0.1:${portB}`);
+  const gotB = collectOps(wsB, [opId(op1)]);
+  wsB.send(JSON.stringify({ t: "hello", trip, have: [] }));
+  await gotB;
+
+  // An op made on B is forwarded to A over the link (an ops_out on B).
+  const B = new Clock("B");
+  B.observe(op1);
+  const op2 = ops.addMember(B, "m1", { name: "Ann" });
+  const gotA = collectOps(wsA, [opId(op2)]);
+  wsB.send(JSON.stringify({ t: "op", op: op2 }));
+  await gotA;
+  await new Promise((r) => setTimeout(r, 100)); // let counters settle
+
+  const peerUrl = `ws://127.0.0.1:${portA}`;
+  const rB = (await get(portB, "/metrics", { authorization: "Bearer tok" })).body;
+  assert.match(rB, /^siano_peer_configured 1$/m);
+  assert.match(rB, new RegExp(`^siano_peer_link_up\\{peer="${peerUrl.replace(/[.]/g, "\\.")}"\\} 1$`, "m"), "dialer reports the link up");
+  assert.match(rB, /^siano_peer_ops_in_total\{peer=".*"\} [1-9][0-9]*$/m, "dialer counted ops ingested from the peer");
+  assert.match(rB, /^siano_peer_ops_out_total\{peer=".*"\} [1-9][0-9]*$/m, "dialer counted ops forwarded to the peer");
+
+  const rA = (await get(portA, "/metrics", { authorization: "Bearer tok" })).body;
+  assert.match(rA, /^siano_peer_configured 0$/m, "acceptor dials nobody");
+  assert.match(rA, /^siano_peer_inbound_connections 1$/m, "acceptor sees one inbound peer connection");
+
+  wsA.close(); wsB.close();
 });
 
 test("a duplicate op is counted as rejected, not appended", async (t) => {

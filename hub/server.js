@@ -391,17 +391,23 @@ export function createHub(opts = {}) {
   // Lazy per-trip hub-to-hub links. `ensure(trip)` (called on every hello) dials
   // configured peers the first time a local leaf touches a trip; `broadcast`
   // forwards local-leaf ops to them. A no-peer-URL hub gets an inert manager.
-  const peers = createPeers({ urls: peerUrls, token: peerToken, logs, fanout, warn, debug });
+  const peers = createPeers({ urls: peerUrls, token: peerToken, logs, fanout, warn, debug, metrics });
   let peerNoTokenWarned = false;
 
   const wss = new WebSocketServer(httpServer, { maxMessageBytes, maxConnections, allowedOrigins });
 
   // Now that the live state exists, wire the metrics scrape to sample it.
+  const countInboundPeers = () => {
+    let n = 0;
+    for (const c of wss.connections) if (c.isPeer) n += 1;
+    return n;
+  };
   metricsCtx.render = () => renderMetrics(metrics, {
     connections: wss.connections.size,
     rooms,
     opCounts: logs.opCounts(),
     tripsOnDisk: logs.tripCount,
+    peer: { ...peers.sample(), inbound: countInboundPeers() },
   });
 
   // Log every refused upgrade — this is where "why can't anyone connect?"
@@ -446,6 +452,7 @@ export function createHub(opts = {}) {
         if (conn.isPeer) {
           if (peerToken) {
             if (msg.token !== peerToken) {
+              metrics.peerAuthFail();
               warn(`ws peer auth failed from ${conn.ip} — closing 1008`);
               conn.close(1008);
               return;
