@@ -156,6 +156,12 @@ script for per-file log sizes. Configs for both hosts (Alpine + Ubuntu) and setu
 steps are in [`ops/alloy/`](../ops/alloy/README.md); the dashboard's *Host machines*
 row renders them, joined to the app metrics by the `hub` label.
 
+**Peer-link metrics** (`siano_peer_*`) cover the hub-to-hub sync WebSocket: whether
+each dialed link is up, ops replicated in/out, reconnects, inbound peer connections,
+and token auth failures. The dialing hub reports link status + op flow; the acceptor
+reports inbound connections. They render in the dashboard's *Hub-to-hub sync* row and
+are empty on a single-hub deployment (`siano_peer_configured` is `0`).
+
 ## Hub-to-hub sync
 
 Two (or more) hubs can replicate a trip's op-log to each other so travellers who

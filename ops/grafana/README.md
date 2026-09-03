@@ -60,6 +60,7 @@ unlabeled series until you add it.)
 | **Host machines** | Per-host CPU %, memory %, disk `/` used (gauge) + free bytes, load average, app log-file sizes (total + per-file table), and a Hosts info table. From node_exporter — see [../alloy/README.md](../alloy/README.md). |
 | **Per-trip** | Top trips by ops (table), per-trip live connections, per-trip op append rate. |
 | **Process** | Hub process resident memory (RSS) and V8 heap (distinct from whole-host memory). |
+| **Hub-to-hub sync (peer link)** | Peer link status (UP/DOWN per dialer→peer), inbound peer connections, configured peers, peer op flow in/out per sec, and peer reconnects / auth failures. Only the dialing hub reports link status/op-flow; the acceptor reports inbound connections. Empty on a single-hub deployment. |
 
 ## Suggested alerts (Grafana → Alerting)
 
@@ -67,6 +68,9 @@ unlabeled series until you add it.)
 - **Abuse / flooding** — `sum(rate(siano_rate_limit_closes_total[5m])) > 0` for 10m.
 - **Trip nearing its op cap** — `max(siano_trip_ops) > 0.9 * <SIANO_MAX_OPS_PER_TRIP>`.
 - **Memory creep** — `max(siano_process_resident_memory_bytes)` above your host budget.
+- **Peer link down** — `max(siano_peer_link_up) < 1` for 5m (only where a hub is configured to dial, i.e. `siano_peer_configured > 0`).
+- **Peer link flapping** — `sum(rate(siano_peer_disconnects_total[5m])) > 0` sustained for 15m.
+- **Peer auth failures** — `sum(rate(siano_peer_auth_failures_total[5m])) > 0` (a peer dialing with the wrong `SIANO_PEER_TOKEN`).
 
 ## Notes
 
