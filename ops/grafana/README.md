@@ -57,7 +57,7 @@ unlabeled series until you add it.)
 | **Overview** | Hub status (`siano_up`), uptime, live connections, active trips, trips on disk, op append rate. |
 | **Traffic** | Op throughput (appended vs rejected), client message rate, connection churn (open/close), concurrency (connections & active trips). |
 | **Errors & abuse** | Rate-limit closes, bad-JSON frames, WS upgrade rejections by reason. |
-| **Host machines** | Per-host CPU %, memory %, disk `/` used (gauge) + free bytes, load average, app log-file sizes (total + per-file table), and a Hosts info table. From node_exporter — see [../alloy/README.md](../alloy/README.md). |
+| **Host machines** | Per-host CPU %, memory %, disk `/` used (gauge) + free bytes, load average, app log-file sizes (total + per-file table), and a Hosts info table. Uses the `host_*` metrics from the lightweight shell pusher ([../push/README.md](../push/README.md)); the heavier Alloy/node_exporter path is in [../alloy/README.md](../alloy/README.md). |
 | **Per-trip** | Top trips by ops (table), per-trip live connections, per-trip op append rate. |
 | **Process** | Hub process resident memory (RSS) and V8 heap (distinct from whole-host memory). |
 | **Hub-to-hub sync (peer link)** | Peer link status (UP/DOWN per dialer→peer), inbound peer connections, configured peers, peer op flow in/out per sec, and peer reconnects / auth failures. Only the dialing hub reports link status/op-flow; the acceptor reports inbound connections. Empty on a single-hub deployment. |

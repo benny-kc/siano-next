@@ -1,5 +1,11 @@
 # Host + hub monitoring with Grafana Alloy
 
+> **Low on RAM? Prefer the agent-less shell pusher in [`../push/`](../push/README.md).**
+> Alloy's component runtime uses ~100–200 MB and can be unstable on a tiny box
+> (Alpine). `ops/push/siano-metrics-push.sh` does the same job with a one-shot
+> `sh` + `curl` on a cron timer (no daemon, ~0 idle RAM). Use Alloy only on hosts
+> that can spare the memory; the two are interchangeable per host.
+
 One **Grafana Alloy** agent runs on each hub host and sends everything to your
 Grafana Cloud (free tier) over outbound HTTPS. Alloy collects two things per host:
 

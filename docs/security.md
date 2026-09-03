@@ -150,11 +150,21 @@ An importable Grafana dashboard for all of the above lives at
 suggested alerts.
 
 **Host / OS metrics** (CPU, memory, disk-free on `/`, load, app log-file sizes)
-are collected by the **same Alloy agent** via its built-in `prometheus.exporter.unix`
-(node_exporter) — no extra daemon and no Node code — plus a tiny textfile-collector
-script for per-file log sizes. Configs for both hosts (Alpine + Ubuntu) and setup
-steps are in [`ops/alloy/`](../ops/alloy/README.md); the dashboard's *Host machines*
-row renders them, joined to the app metrics by the `hub` label.
+can be collected two ways, per host, joined to the app metrics by the `hub` label:
+
+- **Lightweight (recommended for small / low-RAM boxes):** an **agent-less shell
+  pusher**, [`ops/push/siano-metrics-push.sh`](../ops/push/README.md) — a one-shot
+  `sh` + `curl` on a cron timer, no daemon. It computes `host_*` metrics from
+  `/proc`+`df`, sizes the log files, and translates the hub's `/metrics` verbatim,
+  posting InfluxDB line protocol to Grafana Cloud (which maps it back to
+  Prometheus). Idle RAM ≈ 0.
+- **Full-featured:** the **Grafana Alloy** agent via its built-in
+  `prometheus.exporter.unix` (node_exporter), in [`ops/alloy/`](../ops/alloy/README.md).
+  Heavier (~100–200 MB); use it only where the RAM is available.
+
+The dashboard's *Host machines* row uses the `host_*` names from the shell pusher.
+(For the node_exporter/Alloy variant, the Host panels want the `node_*` queries —
+see git history.)
 
 **Peer-link metrics** (`siano_peer_*`) cover the hub-to-hub sync WebSocket: whether
 each dialed link is up, ops replicated in/out, reconnects, inbound peer connections,
