@@ -3,7 +3,7 @@
     {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
-      "description": "The Prometheus data source your Grafana Alloy/Agent remote_writes the Siano hub metrics into. Both hubs write to this one source.",
+      "description": "The Prometheus data source your Grafana Alloy/Agent remote_writes the Siano hub + host metrics into. Both hosts write to this one source.",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
@@ -13,6 +13,7 @@
     { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" },
     { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
     { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
+    { "type": "panel", "id": "gauge", "name": "Gauge", "version": "" },
     { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
     { "type": "panel", "id": "table", "name": "Table", "version": "" }
   ],
@@ -29,7 +30,7 @@
       }
     ]
   },
-  "description": "Operational dashboard for the Siano sync hubs (dependency-free Node relay). Fleet totals plus per-hub breakouts by the `hub` label. Built on the /metrics endpoint from hub/metrics.js.",
+  "description": "Operational dashboard for the Siano sync hubs and the Linux machines they run on. Fleet totals + per-hub breakouts (app metrics from hub/metrics.js) plus host CPU/mem/disk/log-size (node_exporter via Grafana Alloy). Everything joins on the `hub` label.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -58,7 +59,7 @@
       {
         "name": "hub",
         "label": "Hub",
-        "description": "Set external_labels { hub = \"hub-a\" } (and hub-b) in each Alloy remote_write so the two hubs are distinguishable.",
+        "description": "Set external_labels { hub = \"hub-a\" } (and hub-b) in each Alloy remote_write so the two machines are distinguishable.",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
         "query": { "query": "label_values(siano_up, hub)", "refId": "SianoHubVar" },
@@ -72,7 +73,7 @@
       },
       {
         "name": "job",
-        "label": "Job",
+        "label": "App job",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
         "query": { "query": "label_values(siano_up{hub=~\"$hub\"}, job)", "refId": "SianoJobVar" },
@@ -86,7 +87,7 @@
       },
       {
         "name": "instance",
-        "label": "Instance",
+        "label": "App instance",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
         "query": { "query": "label_values(siano_up{hub=~\"$hub\", job=~\"$job\"}, instance)", "refId": "SianoInstanceVar" },
@@ -119,7 +120,7 @@
   "timezone": "",
   "title": "Siano Hub",
   "uid": "siano-hub",
-  "version": 2,
+  "version": 3,
   "weekStart": "",
   "panels": [
     {
@@ -133,92 +134,60 @@
     {
       "type": "stat",
       "title": "Hubs online",
-      "description": "Number of hubs currently reporting siano_up=1 (out of the selected set).",
+      "description": "Number of hubs reporting siano_up=1 (out of the selected set).",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
       "id": 2,
       "targets": [
         { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(siano_up{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "online" }
       ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "orientation": "auto", "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "textMode": "value"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 1 }, { "color": "green", "value": 2 } ] },
-          "noValue": "0", "color": { "mode": "thresholds" }
-        },
-        "overrides": []
-      }
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "textMode": "value" },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 1 }, { "color": "green", "value": 2 } ] }, "noValue": "0", "color": { "mode": "thresholds" } }, "overrides": [] }
     },
     {
       "type": "stat",
       "title": "Live connections (fleet)",
-      "description": "Open WebSocket connections summed across all selected hubs.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
       "id": 3,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(siano_ws_connections{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "connections" }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "orientation": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "value"
-      },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(siano_ws_connections{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "connections" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "value" },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] }
     },
     {
       "type": "stat",
       "title": "Active trips (fleet)",
-      "description": "Trips with at least one live connection, summed across hubs (a trip live on both hubs counts on each).",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
       "id": 4,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(siano_trips_active{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "active" }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "orientation": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "value"
-      },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(siano_trips_active{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "active" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "value" },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "purple" } }, "overrides": [] }
     },
     {
       "type": "stat",
       "title": "Trips on disk (fleet)",
-      "description": "Trip logs persisted, summed across hubs.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
       "id": 5,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(siano_trips_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "total" }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "orientation": "auto", "colorMode": "none", "graphMode": "none", "justifyMode": "auto", "textMode": "value"
-      },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(siano_trips_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "total" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "colorMode": "none", "graphMode": "none", "justifyMode": "auto", "textMode": "value" },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } }, "overrides": [] }
     },
     {
       "type": "stat",
       "title": "Op append rate (fleet)",
-      "description": "Ops accepted into logs per second, summed across hubs.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
       "id": 6,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(rate(siano_ops_appended_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "instant": true, "legendFormat": "ops/s" }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "orientation": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "value"
-      },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(rate(siano_ops_appended_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "instant": true, "legendFormat": "ops/s" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "value" },
       "fieldConfig": { "defaults": { "unit": "ops", "decimals": 2, "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] }
     },
+
     {
       "type": "row",
-      "title": "Per-hub health",
+      "title": "Per-hub health (app)",
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
       "id": 7,
@@ -227,28 +196,12 @@
     {
       "type": "stat",
       "title": "Status per hub",
-      "description": "One tile per hub (the `hub` label). Green = up, red = down.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 4, "w": 8, "x": 0, "y": 6 },
       "id": 8,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (siano_up{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "{{hub}}" }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "orientation": "auto", "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "textMode": "value_and_name"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            { "type": "value", "options": { "0": { "text": "DOWN", "index": 0 } } },
-            { "type": "value", "options": { "1": { "text": "UP", "index": 1 } } }
-          ],
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] },
-          "color": { "mode": "thresholds" }
-        },
-        "overrides": []
-      }
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (siano_up{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "{{hub}}" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "textMode": "value_and_name" },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "index": 0 } } }, { "type": "value", "options": { "1": { "text": "UP", "index": 1 } } } ], "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }, "color": { "mode": "thresholds" } }, "overrides": [] }
     },
     {
       "type": "stat",
@@ -256,13 +209,8 @@
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 4, "w": 8, "x": 8, "y": 6 },
       "id": 9,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (siano_uptime_seconds{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "{{hub}}" }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "orientation": "auto", "colorMode": "none", "graphMode": "none", "justifyMode": "auto", "textMode": "value_and_name"
-      },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (siano_uptime_seconds{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "{{hub}}" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "colorMode": "none", "graphMode": "none", "justifyMode": "auto", "textMode": "value_and_name" },
       "fieldConfig": { "defaults": { "unit": "s", "color": { "mode": "fixed", "fixedColor": "text" } }, "overrides": [] }
     },
     {
@@ -271,20 +219,125 @@
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 4, "w": 8, "x": 16, "y": 6 },
       "id": 10,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (siano_ws_connections{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "{{hub}}" }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "orientation": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "value_and_name"
-      },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (siano_ws_connections{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "{{hub}}" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "value_and_name" },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] }
     },
+
+    {
+      "type": "row",
+      "title": "Host machines (node_exporter via Alloy)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 10 },
+      "id": 26,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU usage % per host",
+      "description": "100 - idle. Averaged across cores per host.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
+      "id": 27,
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "100 * (1 - avg by (hub) (rate(node_cpu_seconds_total{mode=\"idle\", hub=~\"$hub\"}[$__rate_interval])))", "legendFormat": "{{hub}}" } ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 15, "showPoints": "never", "lineWidth": 2, "thresholdsStyle": { "mode": "dashed" } }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 75 }, { "color": "red", "value": 90 } ] }, "color": { "mode": "palette-classic" } }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory usage % per host",
+      "description": "1 - MemAvailable/MemTotal.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
+      "id": 28,
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "100 * (1 - sum by (hub) (node_memory_MemAvailable_bytes{hub=~\"$hub\"}) / sum by (hub) (node_memory_MemTotal_bytes{hub=~\"$hub\"}))", "legendFormat": "{{hub}}" } ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 15, "showPoints": "never", "lineWidth": 2, "thresholdsStyle": { "mode": "dashed" } }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 80 }, { "color": "red", "value": 92 } ] }, "color": { "mode": "palette-classic" } }, "overrides": [] }
+    },
+    {
+      "type": "gauge",
+      "title": "Disk used % (/)",
+      "description": "Root filesystem usage per host. Red past 90%.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 19 },
+      "id": 29,
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\", fstype!~\"tmpfs|overlay|squashfs|ramfs\", hub=~\"$hub\"} / node_filesystem_size_bytes{mountpoint=\"/\", fstype!~\"tmpfs|overlay|squashfs|ramfs\", hub=~\"$hub\"})", "instant": true, "legendFormat": "{{hub}}" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 75 }, { "color": "red", "value": 90 } ] }, "color": { "mode": "thresholds" } }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Disk free (/) per host",
+      "description": "Free bytes on the root mount. Watch the slope for a leak.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 19 },
+      "id": 30,
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "node_filesystem_avail_bytes{mountpoint=\"/\", fstype!~\"tmpfs|overlay|squashfs|ramfs\", hub=~\"$hub\"}", "legendFormat": "{{hub}}" } ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["min", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "asc" } },
+      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Load average per host",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 19 },
+      "id": 31,
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "node_load1{hub=~\"$hub\"}", "legendFormat": "{{hub}} 1m" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "node_load15{hub=~\"$hub\"}", "legendFormat": "{{hub}} 15m" }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 8, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } }, "overrides": [ { "matcher": { "id": "byRegexp", "options": ".*15m" }, "properties": [ { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } } ] } ] }
+    },
+    {
+      "type": "timeseries",
+      "title": "App log size per host",
+      "description": "siano_logfile_bytes summed per host + siano_logdir_bytes (op-log data dir total) from the node_exporter textfile collector.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
+      "id": 32,
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (siano_logfile_bytes{hub=~\"$hub\"})", "legendFormat": "{{hub}} log files" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (siano_logdir_bytes{hub=~\"$hub\"})", "legendFormat": "{{hub}} data dir" }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } }, "overrides": [ { "matcher": { "id": "byRegexp", "options": ".*data dir" }, "properties": [ { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } } ] } ] }
+    },
+    {
+      "type": "table",
+      "title": "Log files (per file)",
+      "description": "Individual file sizes from the textfile collector (siano_logsize.sh).",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 27 },
+      "id": 33,
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "siano_logfile_bytes{hub=~\"$hub\"}", "instant": true, "format": "table" } ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true, "instance": true, "os": true, "__name__": true }, "renameByName": { "hub": "Hub", "path": "Path", "Value": "Bytes" } } },
+        { "id": "sortBy", "options": { "fields": "", "sort": [ { "field": "Bytes", "desc": true } ] } }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "fields": "" } },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true } }, "overrides": [ { "matcher": { "id": "byName", "options": "Bytes" }, "properties": [ { "id": "unit", "value": "bytes" }, { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }, { "id": "color", "value": { "mode": "continuous-GrYlRd" } } ] } ] }
+    },
+    {
+      "type": "table",
+      "title": "Hosts",
+      "description": "One row per machine from node_exporter's uname collector.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 35 },
+      "id": 34,
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "node_uname_info{hub=~\"$hub\"}", "instant": true, "format": "table" } ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true, "instance": true, "__name__": true, "Value": true, "domainname": true, "version": true }, "renameByName": { "hub": "Hub", "os": "OS", "nodename": "Hostname", "sysname": "Kernel", "release": "Kernel version", "machine": "Arch" } } }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "fields": "" } },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true } }, "overrides": [] }
+    },
+
     {
       "type": "row",
       "title": "Traffic (per hub)",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 10 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 },
       "id": 11,
       "panels": []
     },
@@ -293,74 +346,54 @@
       "title": "Op throughput per hub (appended / rejected)",
       "description": "Rejected = duplicate op or a per-trip / global cap hit.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
       "id": 12,
       "targets": [
         { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (rate(siano_ops_appended_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "legendFormat": "{{hub}} appended" },
         { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (rate(siano_ops_rejected_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "legendFormat": "{{hub}} rejected" }
       ],
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "fieldConfig": {
-        "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 12, "showPoints": "never", "lineWidth": 2, "axisLabel": "ops/s" }, "color": { "mode": "palette-classic" } },
-        "overrides": [
-          { "matcher": { "id": "byRegexp", "options": ".*rejected" }, "properties": [ { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } } ] }
-        ]
-      }
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 12, "showPoints": "never", "lineWidth": 2, "axisLabel": "ops/s" }, "color": { "mode": "palette-classic" } }, "overrides": [ { "matcher": { "id": "byRegexp", "options": ".*rejected" }, "properties": [ { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } } ] } ] }
     },
     {
       "type": "timeseries",
       "title": "Client messages per hub",
-      "description": "Frames parsed as JSON objects per second.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
       "id": 13,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (rate(siano_messages_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "legendFormat": "{{hub}}" }
-      ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (rate(siano_messages_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "legendFormat": "{{hub}}" } ],
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "fieldConfig": {
-        "defaults": { "unit": "mps", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 12, "showPoints": "never", "lineWidth": 2, "axisLabel": "msg/s" }, "color": { "mode": "palette-classic" } },
-        "overrides": []
-      }
+      "fieldConfig": { "defaults": { "unit": "mps", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 12, "showPoints": "never", "lineWidth": 2, "axisLabel": "msg/s" }, "color": { "mode": "palette-classic" } }, "overrides": [] }
     },
     {
       "type": "timeseries",
       "title": "Connection churn per hub (open / close per sec)",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 50 },
       "id": 14,
       "targets": [
         { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (rate(siano_ws_opened_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "legendFormat": "{{hub}} opened" },
         { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (rate(siano_ws_closed_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "legendFormat": "{{hub}} closed" }
       ],
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "fieldConfig": {
-        "defaults": { "unit": "cps", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 8, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } },
-        "overrides": [
-          { "matcher": { "id": "byRegexp", "options": ".*closed" }, "properties": [ { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } } ] }
-        ]
-      }
+      "fieldConfig": { "defaults": { "unit": "cps", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 8, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } }, "overrides": [ { "matcher": { "id": "byRegexp", "options": ".*closed" }, "properties": [ { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } } ] } ] }
     },
     {
       "type": "timeseries",
       "title": "Concurrent connections per hub",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 50 },
       "id": 15,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (siano_ws_connections{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "legendFormat": "{{hub}}" }
-      ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (siano_ws_connections{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "legendFormat": "{{hub}}" } ],
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "fieldConfig": {
-        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } },
-        "overrides": []
-      }
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } }, "overrides": [] }
     },
+
     {
       "type": "row",
       "title": "Errors & abuse (per hub)",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 58 },
       "id": 16,
       "panels": []
     },
@@ -369,135 +402,98 @@
       "title": "Rate-limit closes per hub",
       "description": "Connections closed (1008) for exceeding SIANO_MAX_MSGS_PER_SEC.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 28 },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 59 },
       "id": 17,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (rate(siano_rate_limit_closes_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "legendFormat": "{{hub}}" }
-      ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (rate(siano_rate_limit_closes_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "legendFormat": "{{hub}}" } ],
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "fieldConfig": {
-        "defaults": { "unit": "cps", "custom": { "drawStyle": "bars", "fillOpacity": 60, "showPoints": "never", "lineWidth": 1 }, "color": { "mode": "palette-classic" } },
-        "overrides": []
-      }
+      "fieldConfig": { "defaults": { "unit": "cps", "custom": { "drawStyle": "bars", "fillOpacity": 60, "showPoints": "never", "lineWidth": 1 }, "color": { "mode": "palette-classic" } }, "overrides": [] }
     },
     {
       "type": "timeseries",
       "title": "Bad JSON frames per hub",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 28 },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 59 },
       "id": 18,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (rate(siano_bad_json_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "legendFormat": "{{hub}}" }
-      ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub) (rate(siano_bad_json_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "legendFormat": "{{hub}}" } ],
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "fieldConfig": {
-        "defaults": { "unit": "cps", "custom": { "drawStyle": "bars", "fillOpacity": 60, "showPoints": "never", "lineWidth": 1 }, "color": { "mode": "palette-classic" } },
-        "overrides": []
-      }
+      "fieldConfig": { "defaults": { "unit": "cps", "custom": { "drawStyle": "bars", "fillOpacity": 60, "showPoints": "never", "lineWidth": 1 }, "color": { "mode": "palette-classic" } }, "overrides": [] }
     },
     {
       "type": "timeseries",
       "title": "WS upgrade rejections (hub / reason)",
-      "description": "Refused WebSocket upgrades (Origin allowlist, connection cap, bad request, …).",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 28 },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 59 },
       "id": 19,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub, reason) (rate(siano_ws_upgrade_rejected_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\", reason!=\"none\"}[$__rate_interval]))", "legendFormat": "{{hub}} · {{reason}}" }
-      ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (hub, reason) (rate(siano_ws_upgrade_rejected_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\", reason!=\"none\"}[$__rate_interval]))", "legendFormat": "{{hub}} · {{reason}}" } ],
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "fieldConfig": {
-        "defaults": { "unit": "cps", "custom": { "drawStyle": "bars", "fillOpacity": 70, "showPoints": "never", "lineWidth": 1, "stacking": { "mode": "normal", "group": "A" } }, "color": { "mode": "palette-classic" } },
-        "overrides": []
-      }
+      "fieldConfig": { "defaults": { "unit": "cps", "custom": { "drawStyle": "bars", "fillOpacity": 70, "showPoints": "never", "lineWidth": 1, "stacking": { "mode": "normal", "group": "A" } }, "color": { "mode": "palette-classic" } }, "overrides": [] }
     },
+
     {
       "type": "row",
       "title": "Per-trip (across hubs)",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 66 },
       "id": 20,
       "panels": []
     },
     {
       "type": "table",
       "title": "Top trips by ops",
-      "description": "Largest trip logs in memory, merged across hubs (a trip peer-synced to both hubs is summed). Watch against SIANO_MAX_OPS_PER_TRIP.",
+      "description": "Largest trip logs in memory, merged across hubs. Watch against SIANO_MAX_OPS_PER_TRIP.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 36 },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 67 },
       "id": 21,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "topk(15, max by (trip) (siano_trip_ops{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\", trip=~\"$trip\"}))", "instant": true, "format": "table" }
-      ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "topk(15, max by (trip) (siano_trip_ops{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\", trip=~\"$trip\"}))", "instant": true, "format": "table" } ],
       "transformations": [
-        { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true, "instance": true, "hub": true, "__name__": true }, "renameByName": { "trip": "Trip", "Value": "Ops" } } },
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true, "instance": true, "hub": true, "os": true, "__name__": true }, "renameByName": { "trip": "Trip", "Value": "Ops" } } },
         { "id": "sortBy", "options": { "fields": "", "sort": [ { "field": "Ops", "desc": true } ] } }
       ],
       "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "fields": "" } },
-      "fieldConfig": {
-        "defaults": { "custom": { "align": "auto", "filterable": true } },
-        "overrides": [
-          { "matcher": { "id": "byName", "options": "Ops" }, "properties": [ { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }, { "id": "color", "value": { "mode": "continuous-GrYlRd" } } ] }
-        ]
-      }
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true } }, "overrides": [ { "matcher": { "id": "byName", "options": "Ops" }, "properties": [ { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }, { "id": "color", "value": { "mode": "continuous-GrYlRd" } } ] } ] }
     },
     {
       "type": "timeseries",
       "title": "Per-trip live connections",
-      "description": "Total viewers of each trip (summed across hubs — a device connects to one hub).",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 36 },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 67 },
       "id": 22,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (trip) (siano_trip_connections{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\", trip=~\"$trip\"}) > 0", "legendFormat": "{{trip}}" }
-      ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (trip) (siano_trip_connections{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\", trip=~\"$trip\"}) > 0", "legendFormat": "{{trip}}" } ],
       "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "fieldConfig": {
-        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } },
-        "overrides": []
-      }
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } }, "overrides": [] }
     },
     {
       "type": "timeseries",
       "title": "Per-trip op append rate",
-      "description": "Write activity per trip, merged across hubs.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 45 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 76 },
       "id": 23,
-      "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (trip) (rate(siano_trip_ops_appended_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\", trip=~\"$trip\"}[$__rate_interval])) > 0", "legendFormat": "{{trip}}" }
-      ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (trip) (rate(siano_trip_ops_appended_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\", trip=~\"$trip\"}[$__rate_interval])) > 0", "legendFormat": "{{trip}}" } ],
       "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "fieldConfig": {
-        "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } },
-        "overrides": []
-      }
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } }, "overrides": [] }
     },
+
     {
       "type": "row",
       "title": "Process (per hub)",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 53 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 84 },
       "id": 24,
       "panels": []
     },
     {
       "type": "timeseries",
-      "title": "Memory per hub (RSS & V8 heap)",
+      "title": "Node process memory per hub (RSS & V8 heap)",
+      "description": "The hub process itself (siano_process_*), distinct from whole-host memory above.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 54 },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 85 },
       "id": 25,
       "targets": [
         { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (siano_process_resident_memory_bytes{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "legendFormat": "{{hub}} rss" },
         { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (siano_process_heap_used_bytes{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "legendFormat": "{{hub}} heap" }
       ],
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "fieldConfig": {
-        "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 8, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } },
-        "overrides": [
-          { "matcher": { "id": "byRegexp", "options": ".*heap" }, "properties": [ { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } } ] }
-        ]
-      }
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 8, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } }, "overrides": [ { "matcher": { "id": "byRegexp", "options": ".*heap" }, "properties": [ { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } } ] } ] }
     }
   ]
 }

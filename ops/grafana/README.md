@@ -57,8 +57,9 @@ unlabeled series until you add it.)
 | **Overview** | Hub status (`siano_up`), uptime, live connections, active trips, trips on disk, op append rate. |
 | **Traffic** | Op throughput (appended vs rejected), client message rate, connection churn (open/close), concurrency (connections & active trips). |
 | **Errors & abuse** | Rate-limit closes, bad-JSON frames, WS upgrade rejections by reason. |
+| **Host machines** | Per-host CPU %, memory %, disk `/` used (gauge) + free bytes, load average, app log-file sizes (total + per-file table), and a Hosts info table. From node_exporter — see [../alloy/README.md](../alloy/README.md). |
 | **Per-trip** | Top trips by ops (table), per-trip live connections, per-trip op append rate. |
-| **Process** | Resident memory (RSS) and V8 heap. |
+| **Process** | Hub process resident memory (RSS) and V8 heap (distinct from whole-host memory). |
 
 ## Suggested alerts (Grafana → Alerting)
 
