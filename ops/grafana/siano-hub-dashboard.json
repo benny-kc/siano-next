@@ -30,7 +30,7 @@
       }
     ]
   },
-  "description": "Operational dashboard for the Siano sync hubs and the Linux machines they run on. Fleet totals + per-hub breakouts (app metrics from hub/metrics.js) plus host CPU/mem/disk/log-size (node_exporter via Grafana Alloy). Everything joins on the `hub` label.",
+  "description": "Operational dashboard for the Siano sync hubs and the Linux machines they run on. Fleet totals + per-hub breakouts (app metrics from hub/metrics.js) plus host CPU/mem/disk/log-size (host_* metrics from the lightweight shell pusher, or node_exporter). Everything joins on the `hub` label.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -120,7 +120,7 @@
   "timezone": "",
   "title": "Siano Hub",
   "uid": "siano-hub",
-  "version": 4,
+  "version": 5,
   "weekStart": "",
   "panels": [
     {
@@ -226,7 +226,7 @@
 
     {
       "type": "row",
-      "title": "Host machines (node_exporter via Alloy)",
+      "title": "Host machines",
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 10 },
       "id": 26,
@@ -235,44 +235,44 @@
     {
       "type": "timeseries",
       "title": "CPU usage % per host",
-      "description": "100 - idle. Averaged across cores per host.",
+      "description": "Busy % since the previous sample (host_cpu_percent, from the shell pusher or node_exporter).",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
       "id": 27,
-      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "100 * (1 - avg by (hub) (rate(node_cpu_seconds_total{mode=\"idle\", hub=~\"$hub\"}[$__rate_interval])))", "legendFormat": "{{hub}}" } ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (host_cpu_percent{hub=~\"$hub\"})", "legendFormat": "{{hub}}" } ],
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 15, "showPoints": "never", "lineWidth": 2, "thresholdsStyle": { "mode": "dashed" } }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 75 }, { "color": "red", "value": 90 } ] }, "color": { "mode": "palette-classic" } }, "overrides": [] }
     },
     {
       "type": "timeseries",
       "title": "Memory usage % per host",
-      "description": "1 - MemAvailable/MemTotal.",
+      "description": "used / total (host_mem_used_percent).",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
       "id": 28,
-      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "100 * (1 - sum by (hub) (node_memory_MemAvailable_bytes{hub=~\"$hub\"}) / sum by (hub) (node_memory_MemTotal_bytes{hub=~\"$hub\"}))", "legendFormat": "{{hub}}" } ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (host_mem_used_percent{hub=~\"$hub\"})", "legendFormat": "{{hub}}" } ],
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 15, "showPoints": "never", "lineWidth": 2, "thresholdsStyle": { "mode": "dashed" } }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 80 }, { "color": "red", "value": 92 } ] }, "color": { "mode": "palette-classic" } }, "overrides": [] }
     },
     {
       "type": "gauge",
       "title": "Disk used % (/)",
-      "description": "Root filesystem usage per host. Red past 90%.",
+      "description": "Root filesystem usage per host (host_disk_used_percent). Red past 90%.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 8, "w": 6, "x": 0, "y": 19 },
       "id": 29,
-      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\", fstype!~\"tmpfs|overlay|squashfs|ramfs\", hub=~\"$hub\"} / node_filesystem_size_bytes{mountpoint=\"/\", fstype!~\"tmpfs|overlay|squashfs|ramfs\", hub=~\"$hub\"})", "instant": true, "legendFormat": "{{hub}}" } ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (host_disk_used_percent{hub=~\"$hub\"})", "instant": true, "legendFormat": "{{hub}}" } ],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
       "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 75 }, { "color": "red", "value": 90 } ] }, "color": { "mode": "thresholds" } }, "overrides": [] }
     },
     {
       "type": "timeseries",
       "title": "Disk free (/) per host",
-      "description": "Free bytes on the root mount. Watch the slope for a leak.",
+      "description": "Free bytes on the root mount (host_disk_avail_bytes). Watch the slope for a leak.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 8, "w": 9, "x": 6, "y": 19 },
       "id": 30,
-      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "node_filesystem_avail_bytes{mountpoint=\"/\", fstype!~\"tmpfs|overlay|squashfs|ramfs\", hub=~\"$hub\"}", "legendFormat": "{{hub}}" } ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (host_disk_avail_bytes{hub=~\"$hub\"})", "legendFormat": "{{hub}}" } ],
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["min", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "asc" } },
       "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } }, "overrides": [] }
     },
@@ -283,8 +283,8 @@
       "gridPos": { "h": 8, "w": 9, "x": 15, "y": 19 },
       "id": 31,
       "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "node_load1{hub=~\"$hub\"}", "legendFormat": "{{hub}} 1m" },
-        { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "node_load15{hub=~\"$hub\"}", "legendFormat": "{{hub}} 15m" }
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (host_load1{hub=~\"$hub\"})", "legendFormat": "{{hub}} 1m" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (host_load15{hub=~\"$hub\"})", "legendFormat": "{{hub}} 15m" }
       ],
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 8, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } }, "overrides": [ { "matcher": { "id": "byRegexp", "options": ".*15m" }, "properties": [ { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } } ] } ] }
@@ -292,7 +292,7 @@
     {
       "type": "timeseries",
       "title": "App log size per host",
-      "description": "siano_logfile_bytes summed per host + siano_logdir_bytes (op-log data dir total) from the node_exporter textfile collector.",
+      "description": "siano_logfile_bytes summed per host + siano_logdir_bytes (op-log data dir total), from the shell pusher (or the node_exporter textfile collector).",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
       "id": 32,
@@ -312,7 +312,7 @@
       "id": 33,
       "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "siano_logfile_bytes{hub=~\"$hub\"}", "instant": true, "format": "table" } ],
       "transformations": [
-        { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true, "instance": true, "os": true, "__name__": true }, "renameByName": { "hub": "Hub", "path": "Path", "Value": "Bytes" } } },
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true, "instance": true, "os": true, "__name__": true, "__proxy_source__": true }, "renameByName": { "hub": "Hub", "path": "Path", "Value": "Bytes" } } },
         { "id": "sortBy", "options": { "fields": "", "sort": [ { "field": "Bytes", "desc": true } ] } }
       ],
       "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "fields": "" } },
@@ -321,13 +321,13 @@
     {
       "type": "table",
       "title": "Hosts",
-      "description": "One row per machine from node_exporter's uname collector.",
+      "description": "One row per machine (host_uname_info).",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 6, "w": 24, "x": 0, "y": 35 },
       "id": 34,
-      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "node_uname_info{hub=~\"$hub\"}", "instant": true, "format": "table" } ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "host_uname_info{hub=~\"$hub\"}", "instant": true, "format": "table" } ],
       "transformations": [
-        { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true, "instance": true, "__name__": true, "Value": true, "domainname": true, "version": true }, "renameByName": { "hub": "Hub", "os": "OS", "nodename": "Hostname", "sysname": "Kernel", "release": "Kernel version", "machine": "Arch" } } }
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true, "instance": true, "__name__": true, "__proxy_source__": true, "Value": true, "domainname": true, "version": true }, "renameByName": { "hub": "Hub", "os": "OS", "nodename": "Hostname", "sysname": "Kernel", "release": "Kernel version", "machine": "Arch" } } }
       ],
       "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "fields": "" } },
       "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true } }, "overrides": [] }
@@ -446,7 +446,7 @@
       "id": 21,
       "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "topk(15, max by (trip) (siano_trip_ops{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\", trip=~\"$trip\"}))", "instant": true, "format": "table" } ],
       "transformations": [
-        { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true, "instance": true, "hub": true, "os": true, "__name__": true }, "renameByName": { "trip": "Trip", "Value": "Ops" } } },
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true, "instance": true, "hub": true, "os": true, "__name__": true, "__proxy_source__": true }, "renameByName": { "trip": "Trip", "Value": "Ops" } } },
         { "id": "sortBy", "options": { "fields": "", "sort": [ { "field": "Ops", "desc": true } ] } }
       ],
       "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "fields": "" } },
