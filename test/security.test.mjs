@@ -228,3 +228,47 @@ test("non-GET methods are rejected (405)", async (t) => {
   });
   assert.equal(status, 405);
 });
+
+// ---- Force HTTPS (SIANO_FORCE_HTTPS) --------------------------------------
+
+function getRaw(port, pathName, headers = {}) {
+  return new Promise((resolve) => {
+    http.get({ host: "127.0.0.1", port, path: pathName, headers }, (r) => {
+      r.resume();
+      resolve(r);
+    });
+  });
+}
+
+test("force-https: X-Forwarded-Proto=http is 301'd to the https URL", async (t) => {
+  const { port } = await startHub(t, { forceHttps: true });
+  const res = await getRaw(port, "/t/abc123", { host: "siano.example.com", "x-forwarded-proto": "http" });
+  assert.equal(res.statusCode, 301);
+  assert.equal(res.headers.location, "https://siano.example.com/t/abc123");
+  // The redirect itself must never be cached (the scheme call is per-request).
+  assert.match(res.headers["cache-control"] || "", /no-store/);
+});
+
+test("force-https: a proven-https (or headerless) request is served normally", async (t) => {
+  const { port } = await startHub(t, { forceHttps: true });
+  // X-Forwarded-Proto=https ⇒ already secure, serve the app.
+  const secure = await getRaw(port, "/", { host: "siano.example.com", "x-forwarded-proto": "https" });
+  assert.equal(secure.statusCode, 200);
+  // No header at all (a direct dev hit with no proxy) ⇒ NOT redirected, so a
+  // local http://localhost can never loop against a non-TLS https port.
+  const bare = await getRaw(port, "/", { host: "siano.example.com" });
+  assert.equal(bare.statusCode, 200);
+});
+
+test("force-https: off by default — http is served, not redirected", async (t) => {
+  const { port } = await startHub(t);
+  const res = await getRaw(port, "/", { host: "siano.example.com", "x-forwarded-proto": "http" });
+  assert.equal(res.statusCode, 200);
+});
+
+test("force-https: a garbled Host is refused, not turned into an open redirect", async (t) => {
+  const { port } = await startHub(t, { forceHttps: true });
+  // A Host the proxy would never send; must not become a Location target.
+  const res = await getRaw(port, "/", { host: "evil.example.com/path?x=y", "x-forwarded-proto": "http" });
+  assert.notEqual(res.statusCode, 301);
+});

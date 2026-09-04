@@ -211,7 +211,7 @@ Full detail in **docs/security.md**. Key points:
 `SIANO_MAX_TRIPS`, `SIANO_HEARTBEAT_MS`, `SIANO_TRIP_ID_MAX`, `SIANO_PEER_URL`,
 `SIANO_PEER_TOKEN`, `SIANO_METRICS_TOKEN`, `SIANO_DEBUG`, `SIANO_CLIENT_DEBUG`,
 `SIANO_ASSET_HASHING`, `SIANO_CACHE_CONTROL`, `SIANO_CDN_CACHE_CONTROL`,
-`SIANO_SW_CACHE_CONTROL`.
+`SIANO_SW_CACHE_CONTROL`, `SIANO_FORCE_HTTPS`.
 Defaults + meanings are tabled in docs/security.md.
 
 **Static cache headers are env-controlled** (`hub/server.js`,

@@ -21,7 +21,8 @@
 // Env (all optional): HOST, PORT, SIANO_DATA_DIR, SIANO_MAX_MSG_BYTES,
 //   SIANO_MAX_CONNECTIONS, SIANO_MAX_MSGS_PER_SEC, SIANO_ALLOWED_ORIGINS,
 //   SIANO_MAX_OPS_PER_TRIP, SIANO_MAX_TRIPS, SIANO_HEARTBEAT_MS, SIANO_TRIP_ID_MAX,
-//   SIANO_METRICS_TOKEN (gates GET /metrics; off when unset).
+//   SIANO_METRICS_TOKEN (gates GET /metrics; off when unset),
+//   SIANO_FORCE_HTTPS (301 http→https when a proxy sets X-Forwarded-Proto).
 
 import http from "node:http";
 import fs from "node:fs";
@@ -88,6 +89,44 @@ function setSecurityHeaders(res) {
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=(self)");
+}
+
+// A `host[:port]` (incl. bracketed IPv6). Used to build a redirect Location from
+// the request's Host header — validated so a garbled/injected Host is refused
+// (never trusted into a `Location:`) rather than producing an open redirect.
+const HOST_RE = /^[A-Za-z0-9.\-:[\]]{1,255}$/;
+
+// Force HTTP→HTTPS at the hub (opt-in, SIANO_FORCE_HTTPS).
+//
+// Behind a Cloudflare Tunnel, TLS terminates at the edge and cloudflared hands
+// this process PLAIN HTTP — the hub never sees the visitor's real scheme except
+// in `X-Forwarded-Proto` (which Cloudflare/cloudflared and most reverse proxies
+// set to the scheme the browser used). Cloudflare's own "Always Use HTTPS" edge
+// setting is the canonical fix; this is the same thing at the origin, for when
+// that toggle is off or you're behind a different proxy.
+//
+// It ONLY redirects a request the proxy has PROVEN insecure (`X-Forwarded-Proto:
+// http`). A missing header (a direct-to-loopback dev hit with no proxy) is left
+// alone, so enabling this can never trap a local `http://localhost:4000` in a
+// redirect loop to an https port that serves no TLS. A forged header only ever
+// lets a request skip the redirect (harmless) — never invent one — so trusting
+// it is safe even though clients could set it. Returns true once it has answered
+// the request (301), false to let normal serving proceed.
+function forcedHttpsRedirect(req, res) {
+  // A chain of proxies comma-joins the values; the first is the original client.
+  const proto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+  if (proto !== "http") return false; // unknown/https ⇒ don't redirect
+  const host = req.headers["host"];
+  if (!host || !HOST_RE.test(host)) return false; // no/garbled Host ⇒ can't build a safe Location
+  res.writeHead(301, {
+    location: "https://" + host + req.url,
+    // Never let a browser/CDN cache the redirect itself — the scheme decision is
+    // per-request and belongs to the edge, not a pinned 301.
+    "cache-control": "no-store",
+    "content-type": "text/plain; charset=utf-8",
+  });
+  res.end(req.method === "HEAD" ? undefined : "redirecting to https\n");
+  return true;
 }
 
 // Caching policy for static responses — env-controlled.
@@ -206,8 +245,11 @@ function sendBuffer(req, res, cfg, tag, servedPath, buf) {
 // hashing is enabled, the in-memory fingerprinted assets (else `null`). `metrics`
 // is a late-bound context `{ token, render }` — `render` is set once the hub's
 // live state (wss/rooms/logs) exists; a request reads it at scrape time.
-function makeServeStatic(cfg, assets, metrics) {
+function makeServeStatic(cfg, assets, metrics, forceHttps) {
   return function serveStatic(req, res) {
+    // Upgrade an insecure request before anything else (see forcedHttpsRedirect).
+    if (forceHttps && forcedHttpsRedirect(req, res)) return;
+
     setSecurityHeaders(res);
 
     if (req.method !== "GET" && req.method !== "HEAD") {
@@ -362,8 +404,14 @@ export function createHub(opts = {}) {
       warn(`asset hashing disabled — serving unhashed files: ${e.message}`);
     }
   }
+  // HTTP→HTTPS redirect at the origin (opt-in). Off by default; only meaningful
+  // behind a proxy that sets `X-Forwarded-Proto` (Cloudflare Tunnel, nginx, …).
+  const forceHttps = opts.forceHttps !== undefined
+    ? !!opts.forceHttps
+    : truthy(process.env.SIANO_FORCE_HTTPS || "");
+
   const cacheCfg = resolveCacheConfig(opts, !!assets);
-  const httpServer = http.createServer(makeServeStatic(cacheCfg, assets, metricsCtx));
+  const httpServer = http.createServer(makeServeStatic(cacheCfg, assets, metricsCtx, forceHttps));
   // Slowloris / stuck-request guards (belt-and-braces behind Cloudflare).
   httpServer.headersTimeout = 15000;
   httpServer.requestTimeout = 30000;
@@ -564,7 +612,7 @@ export function createHub(opts = {}) {
     await logs.flush();
   }
 
-  return { httpServer, wss, logs, peers, dataDir, cacheCfg, assets, shutdown };
+  return { httpServer, wss, logs, peers, dataDir, cacheCfg, assets, forceHttps, shutdown };
 }
 
 // Auto-start only when run directly (`node hub/server.js`), not when imported.
@@ -590,6 +638,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
     log(`  static cache: assets="${show(cc.asset)}" cdn="${show(cc.cdn)}" sw="${show(cc.sw)}"` +
       `${!hub.assets && cc.asset === "no-cache" ? " (dev default — revalidate always)" : ""}`);
     log(`  metrics    : ${process.env.SIANO_METRICS_TOKEN ? "on — GET /metrics (Bearer token) for Prometheus/Grafana" : "off (set SIANO_METRICS_TOKEN to expose /metrics)"}`);
+    log(`  force https: ${hub.forceHttps ? "on — 301 to https:// when X-Forwarded-Proto=http" : "off (set SIANO_FORCE_HTTPS=1 behind a TLS-terminating proxy)"}`);
     log(`  debug logs : ${DEBUG ? "on" : "off (set SIANO_DEBUG=1 for per-request/op logs)"}`);
     if (HOST === "127.0.0.1" || HOST === "localhost") {
       // The bind default changed to loopback during hardening. If cloudflared
