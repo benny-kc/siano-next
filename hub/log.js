@@ -127,6 +127,24 @@ export class TripLogs {
   }
 
   /**
+   * Every trip id this hub holds — on disk OR loaded in memory. Used by the
+   * hub-to-hub peer link to announce and reconcile the full set of trips over a
+   * single multiplexed connection (peer.js). Reads the log dir each call (cheap:
+   * one readdir), so it reflects trips created since startup too.
+   */
+  trips() {
+    const set = new Set(this.mem.keys());
+    try {
+      for (const f of fs.readdirSync(this.dir)) {
+        if (f.endsWith(".jsonl")) set.add(decodeURIComponent(f.slice(0, -".jsonl".length)));
+      }
+    } catch {
+      /* dir vanished mid-run — the in-memory set is the best we have */
+    }
+    return [...set];
+  }
+
+  /**
    * Per-trip op counts for trips currently held in memory (metrics only — does
    * not touch disk, so it reflects trips this hub has actually served this run).
    * @returns {Map<string, number>} trip -> ops in memory.
@@ -134,6 +152,21 @@ export class TripLogs {
   opCounts() {
     const out = new Map();
     for (const [trip, map] of this.mem) out.set(trip, map.size);
+    return out;
+  }
+
+  /**
+   * The ops this trip holds for the given op-ids (unknown ids skipped). Used by
+   * the peer link to answer a `pwant` (the ids a peer hub asked us to send).
+   */
+  pick(trip, ids) {
+    if (!Array.isArray(ids)) return [];
+    const map = this._load(trip);
+    const out = [];
+    for (const id of ids) {
+      const op = map.get(id);
+      if (op) out.push(op);
+    }
     return out;
   }
 

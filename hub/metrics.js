@@ -139,11 +139,11 @@ export function render(m, live) {
   const plinks = peer.links || [];
   if (plinks.length) {
     const lbl = (l) => `{peer="${esc(l.peer)}"}`;
-    emit("siano_peer_link_up", "gauge", "1 if at least one per-trip link to this peer hub is open, else 0.",
+    emit("siano_peer_link_up", "gauge", "1 if the always-on link to this peer hub is up, else 0.",
       plinks.map((l) => [lbl(l), l.open > 0 ? 1 : 0]));
-    emit("siano_peer_links_open", "gauge", "Per-trip links to this peer hub currently OPEN.",
+    emit("siano_peer_links_open", "gauge", "Multiplexed links to this peer hub currently OPEN (0 or 1).",
       plinks.map((l) => [lbl(l), l.open]));
-    emit("siano_peer_links_total", "gauge", "Per-trip links to this peer hub created (open or reconnecting).",
+    emit("siano_peer_links_total", "gauge", "Multiplexed links to this peer hub configured (always 1).",
       plinks.map((l) => [lbl(l), l.total]));
   }
   const peerCounter = (name, help, map) => {

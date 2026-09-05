@@ -1,58 +1,191 @@
-// Hub-to-hub replication (Phase 1) — sync one trip's op-log between two hubs.
+// Hub-to-hub replication (Phase 2) — ONE always-on link per peer, multiplexing
+// EVERY trip.
 //
-// A hub can DIAL one or more peer hubs (SIANO_PEER_URL) and speak the EXACT
-// client sync protocol over the wire, per trip. Because ops are content-addressed
-// and deduped (log.js) and the reducer is order-independent, a peer link needs no
-// new merge logic — it is just a "big leaf" that happens to be another hub. The
-// same `hello`/`sync`/`want` exchange that heals an offline phone on reconnect
-// heals a flaky hub↔hub link.
+// Phase 1 opened a separate WebSocket per (peer, trip), lazily, the first time a
+// local leaf touched a trip. Phase 2 replaces that with a single multiplexed
+// connection per configured peer that:
+//   • is ACTIVE, not lazy — the dialer opens it as soon as the hub is up and
+//     keeps it up forever (reconnect with backoff), independent of any trip or
+//     leaf. So there is never a moment where this hub has data to send but no
+//     link to send it over: if the link is down the *peer* is down, and the
+//     backlog flushes automatically the instant the link comes back.
+//   • carries ALL trips over the one socket — every frame names its `trip`.
+//   • is symmetric once up: whoever DIALS authenticates (sends the token); the
+//     ACCEPTOR (a hub with no SIANO_PEER_URL — a passive listener) just answers.
+//     A single dial is fully bidirectional, so a passive hub needs no config
+//     beyond the shared token to both receive and send.
 //
-// TOPOLOGY (Phase 1 supports these; a 3+ hub transitive relay is future work):
-//   • Two hubs — configure ONE to dial the other. The link is bidirectional (the
-//     `hello` exchange diffs both ways), so a single dial replicates in both
-//     directions. Symmetric dialing also works (dedup makes the extra link
-//     harmless, just chattier).
-//   • Star — spokes each dial a central hub. The central hub relays between
-//     spokes through its ordinary room fan-out (each dialer is a leaf-like conn
-//     in the hub's room), so the hub needs no peer config at all.
-// Ops that arrive FROM a peer are appended + fanned to LOCAL leaves only; they
-// are NOT re-forwarded to other peers. Dedup keeps even a full mesh correct, but
-// a chain (S1→M→S2) would not relay transitively in Phase 1 — prefer a star.
+// Because ops are content-addressed + deduped (log.js) and the reducer is
+// order-independent, replication needs no merge logic — a peer link is a "big
+// leaf." A newly-ingested peer op is fanned to LOCAL leaves and re-forwarded to
+// OTHER peer links (never back to its source); dedup (`append` → false) stops
+// any loop, so a chain / star / full mesh all converge correctly.
 //
-// LAZY: a link for trip T is opened the first time a local leaf joins T
-// (server.js calls `ensure(T)` from the `hello` handler). A trip therefore
-// replicates across hubs exactly when it is actually used on this hub — which is
-// what "another traveller connects to the same trip on the other hub" needs.
+// Wire protocol (JSON text frames; all but the handshake carry `trip`):
+//   dialer → acceptor  { t:"phello", token? }            // authenticate the link
+//   acceptor → dialer  { t:"ptrips", trips:[id,...] }     // announce my trip ids
+//   dialer → acceptor  { t:"phave",  trip, have:[opId,...] } // reconcile one trip
+//   either →           { t:"pwant",  trip, want:[opId,...] } // ids I lack, send them
+//   either →           { t:"pops",   trip, ops:[...] }       // ops (reconcile + live)
+// On connect the dialer reconciles the UNION of its own trips and the acceptor's
+// announced trips; `phave` diffs both ways (missing ops pushed, wanted ops asked
+// for), so any backlog on either side — including trips created while the link
+// was down — flushes on every (re)connect. Live edits then flow as `pops`.
 //
-// AUTH: the dialer offers the `siano-peer` subprotocol (so ws.js exempts it from
-// the Origin allowlist — a Node WS client sends no Origin) and presents a shared
-// token in its `hello`; the acceptor checks it (server.js). No token ⇒ accepted
-// with a loud warning (see server.js). This does NOT authenticate individual ops
-// (that still waits on per-device op signing) — it authenticates the peer hub.
+// AUTH: peer links offer the `siano-peer` subprotocol (ws.js exempts them from
+// the Origin allowlist — a Node WS client sends no Origin) and present a shared
+// token in `phello`. A mismatch is closed 1008. No token configured ⇒ accepted
+// with a loud one-time warning. This authenticates the peer HUB, not individual
+// ops (per-device op signing is still a roadmap item) — so only link hubs you
+// operate. See docs/security.md → Hub-to-hub sync.
 
 import { opId } from "../client/js/core/lamport.js";
 import { isValidOp } from "./log.js";
 import { PEER_SUBPROTOCOL } from "./ws.js";
 
-// One dial: this hub → one peer hub, for one trip. Mirrors client/js/sync/client.js
-// (reconnect/backoff, hello-with-have, delta-on-reconnect, answer `want`) but
-// ingests into the durable TripLogs and fans out to LOCAL leaves.
-class PeerLink {
-  /** @param {string} url @param {string} trip @param {object} deps */
-  constructor(url, trip, deps) {
+const OPS_BATCH = 200; // ops per `pops` frame — keeps a frame well under the cap
+
+// One authenticated peer session over a transport (an outbound dialed socket or
+// an inbound accepted Conn). Symmetric after the handshake; `role` only decides
+// who speaks first and who initiates reconciliation.
+class Session {
+  /**
+   * @param {{label:string, send:(obj:object)=>void, close:(code?:number)=>void}} tx
+   * @param {"dialer"|"acceptor"} role
+   * @param {object} mgr the PeerManager internals
+   */
+  constructor(tx, role, mgr) {
+    this.tx = tx;
+    this.role = role;
+    this.mgr = mgr;
+    this.registered = false;
+  }
+
+  // Dialer speaks first (phello, then reconcile once it hears ptrips). Acceptor
+  // waits for phello before doing anything.
+  start() {
+    if (this.role !== "dialer") return;
+    this.tx.send({ t: "phello", ...(this.mgr.token ? { token: this.mgr.token } : {}) });
+    this._register();
+  }
+
+  _register() {
+    if (this.registered) return;
+    this.registered = true;
+    this.mgr.registry.add(this);
+  }
+
+  onClose() {
+    if (!this.registered) return;
+    this.registered = false;
+    this.mgr.registry.delete(this);
+  }
+
+  async onFrame(msg) {
+    if (!msg || typeof msg !== "object") return;
+    const { logs, warn, debug, isValidTrip } = this.mgr.deps;
+    switch (msg.t) {
+      case "phello": {
+        if (this.role !== "acceptor") return; // a dialer never receives phello
+        if (this.mgr.token) {
+          if (msg.token !== this.mgr.token) {
+            this.mgr.metrics?.peerAuthFail();
+            warn(`peer: inbound auth failed from ${this.tx.label} — closing 1008`);
+            this.tx.close(1008);
+            return;
+          }
+        } else {
+          this.mgr.warnNoToken(this.tx.label);
+        }
+        this._register();
+        // Announce our trips so the dialer reconciles the union of both sides.
+        this.tx.send({ t: "ptrips", trips: logs.trips() });
+        debug(`peer: inbound link up from ${this.tx.label}`);
+        return;
+      }
+      case "ptrips": {
+        if (this.role !== "dialer") return;
+        this._reconcile(Array.isArray(msg.trips) ? msg.trips : []);
+        return;
+      }
+      case "phave": {
+        if (!isValidTrip(msg.trip)) return;
+        // Push what they lack, ask for what we lack — both directions in one step.
+        this._sendOps(msg.trip, logs.missing(msg.trip, msg.have));
+        const want = logs.wanted(msg.trip, msg.have);
+        if (want.length) this.tx.send({ t: "pwant", trip: msg.trip, want });
+        return;
+      }
+      case "pwant": {
+        if (!isValidTrip(msg.trip) || !Array.isArray(msg.want)) return;
+        this._sendOps(msg.trip, logs.pick(msg.trip, msg.want));
+        return;
+      }
+      case "pops": {
+        if (!isValidTrip(msg.trip) || !Array.isArray(msg.ops)) return;
+        await this._ingest(msg.trip, msg.ops);
+        return;
+      }
+      default:
+        debug(`peer: unknown frame t=${msg.t} from ${this.tx.label}`);
+    }
+  }
+
+  // Dialer only: reconcile the union of our trips and theirs. `phave` for each
+  // pulls what we're missing AND offers what they're missing, so a single pass
+  // converges both hubs (including trips created while the link was down).
+  _reconcile(theirTrips) {
+    const { logs, debug, isValidTrip } = this.mgr.deps;
+    const union = new Set(logs.trips());
+    for (const t of theirTrips) if (typeof t === "string") union.add(t);
+    debug(`peer: reconciling ${union.size} trips with ${this.tx.label}`);
+    for (const trip of union) {
+      if (!isValidTrip(trip)) continue;
+      this.tx.send({ t: "phave", trip, have: logs.all(trip).map(opId) });
+    }
+  }
+
+  // Append peer ops to our durable log; fan the NEW ones to LOCAL leaves and
+  // re-forward them to OTHER peer links (never this one). Dedup stops loops.
+  async _ingest(trip, ops) {
+    const { logs, fanout, debug } = this.mgr.deps;
+    const added = [];
+    for (const op of ops) {
+      if (isValidOp(op) && (await logs.append(trip, op))) added.push(op);
+    }
+    if (!added.length) return;
+    this.mgr.metrics?.peerRecvOps(this.tx.label, added.length);
+    debug(`peer: ingested ${added.length}/${ops.length} for ${trip} from ${this.tx.label}`);
+    fanout(trip, { t: "ops", ops: added }); // local leaves
+    this.mgr.broadcastOps(trip, added, this); // other peers (except source)
+  }
+
+  // Send ops for a trip as batched `pops` frames (bounded by the peer frame cap).
+  _sendOps(trip, ops) {
+    if (!ops || !ops.length) return;
+    for (let i = 0; i < ops.length; i += OPS_BATCH) {
+      const batch = ops.slice(i, i + OPS_BATCH);
+      this.tx.send({ t: "pops", trip, ops: batch });
+      this.mgr.metrics?.peerSentOps(this.tx.label, batch.length);
+    }
+  }
+}
+
+// One outbound dialer: keeps a single multiplexed link to `url` up forever.
+class OutboundPeer {
+  constructor(url, mgr) {
     this.url = url;
-    this.trip = trip;
-    this.deps = deps; // { logs, fanout, token, warn, debug }
+    this.mgr = mgr;
     this.ws = null;
-    this.backoff = 1000;
+    this.session = null;
+    this.backoff = 500;
     this.maxBackoff = 30000;
     this.closed = false;
   }
 
-  connect() {
+  start() {
     this.closed = false;
     this._open();
-    return this;
   }
 
   close() {
@@ -64,54 +197,68 @@ class PeerLink {
     }
   }
 
-  _isOpen() {
-    return this.ws && this.ws.readyState === 1; // WebSocket.OPEN
+  /** For metrics.sample(): is the link currently up? */
+  get up() {
+    return !!this.session;
   }
 
   _open() {
-    const { debug, warn } = this.deps;
+    const { warn, debug } = this.mgr.deps;
     let ws;
     try {
-      // The subprotocol both marks us as a peer to ws.js (Origin-exempt) and is
-      // echoed back on the 101 — see hub/ws.js.
       ws = new WebSocket(this.url, PEER_SUBPROTOCOL);
     } catch (e) {
-      // A structurally-bad URL will never connect — don't spin retrying it.
       warn(`peer: cannot dial ${this.url}: ${e.message}`);
+      this._reconnect();
       return;
     }
     this.ws = ws;
-    debug(`peer: dialing ${this.url} trip=${this.trip}`);
+    debug(`peer: dialing ${this.url}`);
+    const tx = {
+      label: this.url,
+      send: (obj) => {
+        try {
+          ws.send(JSON.stringify(obj));
+        } catch {
+          /* closing — reconnect + reconcile will catch up */
+        }
+      },
+      close: () => {
+        try {
+          ws.close();
+        } catch {
+          /* already closing */
+        }
+      },
+    };
 
     ws.onopen = () => {
-      this.backoff = 1000;
-      this.deps.metrics?.peerConnect(this.url);
-      const have = this.deps.logs.all(this.trip).map(opId);
-      debug(`peer: open ${this.url} trip=${this.trip} — hello have=${have.length}`);
-      this._send({
-        t: "hello",
-        trip: this.trip,
-        have,
-        peer: true,
-        ...(this.deps.token ? { token: this.deps.token } : {}),
-      });
+      this.backoff = 500;
+      this.mgr.metrics?.peerConnect(this.url);
+      this.session = new Session(tx, "dialer", this.mgr);
+      this.session.start();
+      debug(`peer: link up ${this.url}`);
     };
-
     ws.onmessage = (ev) => {
-      this._onMessage(ev).catch((e) => warn(`peer: message error trip=${this.trip}: ${e.message}`));
+      let msg;
+      try {
+        msg = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      this.session?.onFrame(msg).catch((e) => warn(`peer: frame error ${this.url}: ${e.message}`));
     };
-
-    ws.onclose = (ev) => {
+    ws.onclose = () => {
+      const wasUp = !!this.session;
+      if (this.session) {
+        this.session.onClose();
+        this.session = null;
+      }
       if (this.closed) return;
-      this.deps.metrics?.peerDisconnect(this.url);
-      const wait = this.backoff;
-      this.backoff = Math.min(this.backoff * 2, this.maxBackoff);
-      debug(`peer: closed ${this.url} trip=${this.trip} code=${ev?.code ?? "?"} — reconnect in ${wait}ms`);
-      setTimeout(() => !this.closed && this._open(), wait);
+      if (wasUp) this.mgr.metrics?.peerDisconnect(this.url);
+      this._reconnect();
     };
-
     ws.onerror = () => {
-      // The close handler drives reconnect; just make sure the socket tears down.
       try {
         ws.close();
       } catch {
@@ -120,144 +267,129 @@ class PeerLink {
     };
   }
 
-  async _onMessage(ev) {
-    let msg;
-    try {
-      msg = JSON.parse(ev.data);
-    } catch {
-      return;
-    }
-    if (!msg || typeof msg !== "object") return;
-    if (msg.t === "op" && msg.op) {
-      await this._ingest([msg.op]);
-    } else if ((msg.t === "ops" || msg.t === "sync") && Array.isArray(msg.ops)) {
-      await this._ingest(msg.ops);
-      // A `sync` may also ask for ops the peer is missing that we hold (its
-      // half of the two-way delta) — answer by pushing them back, exactly like
-      // a leaf answers the hub's `want`.
-      if (msg.t === "sync" && Array.isArray(msg.want) && msg.want.length) this._pushWanted(msg.want);
-    }
-  }
-
-  // Append peer ops to our durable log and fan the NEW ones out to our LOCAL
-  // leaves (never back to peers — that's what stops an echo/loop between two
-  // hubs). `append` dedups, so re-delivery is always safe.
-  async _ingest(ops) {
-    const { logs, fanout, debug } = this.deps;
-    const added = [];
-    for (const op of ops) {
-      if (isValidOp(op) && (await logs.append(this.trip, op))) added.push(op);
-    }
-    if (added.length) {
-      this.deps.metrics?.peerRecvOps(this.url, added.length);
-      debug(`peer: ingested ${added.length}/${ops.length} from ${this.url} trip=${this.trip}`);
-      fanout(this.trip, { t: "ops", ops: added });
-    }
-  }
-
-  // Push the ops a peer's `want` list names that we actually hold, in batches
-  // that stay under the hub's max-message cap (same shape as the client).
-  _pushWanted(ids) {
-    const map = new Map(this.deps.logs.all(this.trip).map((o) => [opId(o), o]));
-    const ops = [];
-    for (const id of ids) {
-      const op = map.get(id);
-      if (op) ops.push(op);
-    }
-    if (!ops.length) return;
-    this.deps.debug(`peer: ${this.url} wants ${ids.length} — pushing ${ops.length} trip=${this.trip}`);
-    const BATCH = 200;
-    for (let i = 0; i < ops.length; i += BATCH) this._send({ t: "ops", ops: ops.slice(i, i + BATCH) });
-  }
-
-  send(obj) {
-    this._send(obj);
-  }
-
-  _send(obj) {
-    if (!this._isOpen()) return; // dropped now → reconciled by the next hello's have/want
-    try {
-      this.ws.send(JSON.stringify(obj));
-      // Count only op/ops actually put on the wire (not the hello handshake).
-      if (obj?.t === "op" && obj.op) this.deps.metrics?.peerSentOps(this.url, 1);
-      else if (obj?.t === "ops" && Array.isArray(obj.ops)) this.deps.metrics?.peerSentOps(this.url, obj.ops.length);
-    } catch {
-      /* closing — reconnect + hello will resync */
-    }
+  _reconnect() {
+    const wait = this.backoff;
+    this.backoff = Math.min(this.backoff * 2, this.maxBackoff);
+    this.mgr.deps.debug(`peer: ${this.url} down — reconnect in ${wait}ms`);
+    setTimeout(() => !this.closed && this._open(), wait);
   }
 }
 
 /**
- * Peer manager: maintains lazy per-trip links to every configured peer URL.
+ * Peer manager: one always-on multiplexed link per configured peer URL, plus a
+ * registry of every authenticated session (outbound + inbound) for fan-out.
  * @param {{urls?: string[], token?: string, logs: import("./log.js").TripLogs,
  *   fanout: (trip: string, obj: object, except?: any) => void,
- *   warn?: Function, debug?: Function}} deps
+ *   isValidTrip?: (id:any)=>boolean, warn?: Function, debug?: Function,
+ *   metrics?: object}} deps
  */
 export function createPeers(deps) {
   const urls = (deps.urls || []).filter(Boolean);
   const token = deps.token || "";
   const warn = deps.warn || (() => {});
   const debug = deps.debug || (() => {});
-  const links = new Map(); // `${url} ${trip}` -> PeerLink
-  const key = (url, trip) => `${url} ${trip}`;
   const metrics = deps.metrics || null;
-  const linkDeps = { logs: deps.logs, fanout: deps.fanout, token, warn, debug, metrics };
+  const isValidTrip = deps.isValidTrip || (() => true);
 
-  // Open a link per peer URL for this trip if one isn't open already. Idempotent
-  // (safe to call on every `hello`). Links are not torn down when the last local
-  // leaf leaves a trip — a small, bounded cost given trips are bounded by use.
-  function ensure(trip) {
-    if (!urls.length) return;
+  const registry = new Set(); // authenticated Sessions (outbound + inbound)
+  const dialers = []; // OutboundPeer[]
+  let noTokenWarned = false;
+
+  const mgr = {
+    token,
+    metrics,
+    registry,
+    deps: { logs: deps.logs, fanout: deps.fanout, isValidTrip, warn, debug },
+    warnNoToken(label) {
+      if (noTokenWarned) return;
+      noTokenWarned = true;
+      warn(`peer: inbound peer ${label} connected WITHOUT a token — any client offering the peer subprotocol can inject ops. Set SIANO_PEER_TOKEN on both hubs.`);
+    },
+    // Forward ops for a trip to every peer session except `except` (the source).
+    broadcastOps(trip, ops, except) {
+      if (!registry.size || !ops || !ops.length) return;
+      for (const s of registry) if (s !== except) s._sendOps(trip, ops);
+    },
+  };
+
+  // Begin (and forever maintain) the outbound links. Called when the hub is up.
+  function start() {
     for (const url of urls) {
-      const k = key(url, trip);
-      if (links.has(k)) continue;
-      const link = new PeerLink(url, trip, linkDeps);
-      links.set(k, link);
-      link.connect();
+      const d = new OutboundPeer(url, mgr);
+      dialers.push(d);
+      d.start();
     }
   }
 
-  // Forward a LOCAL-leaf op/ops to every peer link for the trip. Ops that
-  // arrived FROM a peer are ingested + fanned by PeerLink and never routed here,
-  // so a forwarded op can't bounce back to its origin hub.
-  function broadcast(trip, obj) {
-    if (!urls.length) return;
-    for (const url of urls) {
-      const link = links.get(key(url, trip));
-      if (link) link.send(obj);
-    }
+  // Adopt an inbound peer connection (ws.js flagged conn.isPeer). It authenticates
+  // by sending `phello`; until then it's parked (not in the registry).
+  function onInboundConn(conn) {
+    const tx = {
+      label: conn.ip || "inbound",
+      send: (obj) => {
+        try {
+          conn.send(JSON.stringify(obj));
+        } catch {
+          /* peer gone */
+        }
+      },
+      close: (code) => {
+        try {
+          conn.close(code || 1008);
+        } catch {
+          /* already closing */
+        }
+      },
+    };
+    const session = new Session(tx, "acceptor", mgr);
+    conn.on("message", (data) => {
+      let msg;
+      try {
+        msg = JSON.parse(data);
+      } catch {
+        return;
+      }
+      session.onFrame(msg).catch((e) => warn(`peer: inbound frame error: ${e.message}`));
+    });
+    conn.on("close", () => session.onClose());
+  }
+
+  // Forward a local-leaf op (or batch) to all peer links. Called from server.js
+  // after the op is appended + fanned to local leaves.
+  function broadcastOp(trip, op) {
+    mgr.broadcastOps(trip, [op], null);
+  }
+  function broadcastOps(trip, ops) {
+    mgr.broadcastOps(trip, ops, null);
   }
 
   function shutdown() {
-    for (const link of links.values()) link.close();
-    links.clear();
+    for (const d of dialers) d.close();
+    for (const s of [...registry]) s.tx.close(1001);
+    registry.clear();
   }
 
-  // Live snapshot for metrics: per-peer-URL open/total per-trip link counts, so a
-  // scrape can report which peer hubs are actually reachable right now.
+  // Live snapshot for metrics: one entry per configured peer URL with whether its
+  // always-on link is currently up (open 1/0, total 1). Inbound links are counted
+  // separately by the server (they have no stable URL label).
   function sample() {
-    const per = new Map(); // url -> { open, total }
-    for (const link of links.values()) {
-      const cur = per.get(link.url) || { open: 0, total: 0 };
-      cur.total += 1;
-      if (link._isOpen()) cur.open += 1;
-      per.set(link.url, cur);
-    }
     return {
       configured: urls.length,
-      links: [...per].map(([peer, v]) => ({ peer, open: v.open, total: v.total })),
+      links: dialers.map((d) => ({ peer: d.url, open: d.up ? 1 : 0, total: 1 })),
     };
   }
 
   return {
-    ensure,
-    broadcast,
+    start,
+    onInboundConn,
+    broadcastOp,
+    broadcastOps,
     shutdown,
     sample,
     enabled: urls.length > 0,
     urls,
     get size() {
-      return links.size;
+      return registry.size;
     },
   };
 }
