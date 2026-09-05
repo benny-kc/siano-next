@@ -27,7 +27,7 @@ import { installState } from "./install.js";
 import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 2);
+registerVersion("js/ui/board.js", 3);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -501,11 +501,17 @@ function appearanceSection(actions) {
     ),
   );
 
+  // The full-screen toggle only makes sense in a browser tab (it re-enters the
+  // Fullscreen API on gestures to hide the browser chrome). An installed PWA is
+  // already chrome-free (standalone) and has no browser bars to escape, so the
+  // toggle is a no-op there — hide the row entirely when running as an app.
   const fs = fullscreenPreferred();
-  const fullscreen = el("div", { class: "appear-row" },
-    el("span", { class: "lbl" }, "Full screen"),
-    el("button", { type: "button", class: "toggle", "aria-pressed": String(fs), onclick: () => actions.toggleFullscreen() }, fs ? "On" : "Off"),
-  );
+  const fullscreen = installState() === "standalone"
+    ? null
+    : el("div", { class: "appear-row" },
+        el("span", { class: "lbl" }, "Full screen"),
+        el("button", { type: "button", class: "toggle", "aria-pressed": String(fs), onclick: () => actions.toggleFullscreen() }, fs ? "On" : "Off"),
+      );
 
   const fonts = el("div", { class: "font-pills" },
     ...FONTS.map((f) =>
