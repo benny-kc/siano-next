@@ -272,3 +272,86 @@ test("force-https: a garbled Host is refused, not turned into an open redirect",
   const res = await getRaw(port, "/", { host: "evil.example.com/path?x=y", "x-forwarded-proto": "http" });
   assert.notEqual(res.statusCode, 301);
 });
+
+// ---- GitHub deploy webhook (SIANO_GITHUB_WEBHOOK) --------------------------
+
+const WEBHOOK_SECRET = "s3cr3t-webhook-token";
+function ghSign(secret, body) {
+  return "sha256=" + crypto.createHmac("sha256", secret).update(body).digest("hex");
+}
+// POST to a path, returning { status, triggered } where `triggered` reflects
+// whether the hub's webhook callback ran (a spy passed via onGithubWebhook).
+function postRaw(port, pathName, body, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: "127.0.0.1", port, path: pathName, method: "POST", headers },
+      (r) => { r.resume(); r.on("end", () => resolve(r.statusCode)); },
+    );
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
+test("gh webhook: a correctly-signed POST is accepted and stops the hub", async (t) => {
+  let triggered = 0;
+  const { port } = await startHub(t, {
+    githubWebhookToken: WEBHOOK_SECRET,
+    onGithubWebhook: () => { triggered += 1; },
+  });
+  const body = JSON.stringify({ ref: "refs/heads/main" });
+  const status = await postRaw(port, "/webhookforgitHub", body, {
+    "content-type": "application/json",
+    "x-github-event": "push",
+    "x-hub-signature-256": ghSign(WEBHOOK_SECRET, body),
+  });
+  assert.equal(status, 200);
+  assert.equal(triggered, 1);
+});
+
+test("gh webhook: a bad signature is rejected (401) and does NOT stop the hub", async (t) => {
+  let triggered = 0;
+  const { port } = await startHub(t, {
+    githubWebhookToken: WEBHOOK_SECRET,
+    onGithubWebhook: () => { triggered += 1; },
+  });
+  const body = JSON.stringify({ ref: "refs/heads/main" });
+  const status = await postRaw(port, "/webhookforgitHub", body, {
+    "content-type": "application/json",
+    "x-hub-signature-256": ghSign("wrong-secret", body),
+  });
+  assert.equal(status, 401);
+  assert.equal(triggered, 0);
+});
+
+test("gh webhook: a missing signature is rejected (401)", async (t) => {
+  let triggered = 0;
+  const { port } = await startHub(t, {
+    githubWebhookToken: WEBHOOK_SECRET,
+    onGithubWebhook: () => { triggered += 1; },
+  });
+  const status = await postRaw(port, "/webhookforgitHub", "{}", { "content-type": "application/json" });
+  assert.equal(status, 401);
+  assert.equal(triggered, 0);
+});
+
+test("gh webhook: the route is 404 (and inert) when SIANO_GITHUB_WEBHOOK is unset", async (t) => {
+  let triggered = 0;
+  const { port } = await startHub(t, { onGithubWebhook: () => { triggered += 1; } });
+  const body = "{}";
+  const status = await postRaw(port, "/webhookforgitHub", body, {
+    "x-hub-signature-256": ghSign(WEBHOOK_SECRET, body),
+  });
+  assert.equal(status, 404);
+  assert.equal(triggered, 0);
+});
+
+test("gh webhook: a GET (crawler/prefetch) never triggers a shutdown (405)", async (t) => {
+  let triggered = 0;
+  const { port } = await startHub(t, {
+    githubWebhookToken: WEBHOOK_SECRET,
+    onGithubWebhook: () => { triggered += 1; },
+  });
+  const res = await getRaw(port, "/webhookforgitHub");
+  assert.equal(res.statusCode, 405);
+  assert.equal(triggered, 0);
+});

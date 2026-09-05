@@ -22,12 +22,14 @@
 //   SIANO_MAX_CONNECTIONS, SIANO_MAX_MSGS_PER_SEC, SIANO_ALLOWED_ORIGINS,
 //   SIANO_MAX_OPS_PER_TRIP, SIANO_MAX_TRIPS, SIANO_HEARTBEAT_MS, SIANO_TRIP_ID_MAX,
 //   SIANO_METRICS_TOKEN (gates GET /metrics; off when unset),
+//   SIANO_GITHUB_WEBHOOK (shared secret gating POST /webhookforgitHub, which
+//     stops the hub for an external supervisor to redeploy; off when unset),
 //   SIANO_FORCE_HTTPS (301 http→https when a proxy sets X-Forwarded-Proto).
 
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WebSocketServer } from "./ws.js";
 import { TripLogs, isValidOp } from "./log.js";
@@ -232,6 +234,78 @@ function bearerOk(req, token) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// ---- GitHub deploy webhook -------------------------------------------------
+// A GitHub webhook (Settings → Webhooks) POSTs here on every push; an external
+// supervisor is expected to pull the new code and restart the process, so all
+// this route does is AUTHENTICATE the delivery and then STOP the hub. It exists
+// only when SIANO_GITHUB_WEBHOOK is set (the shared secret), and is 404 (as if
+// the route didn't exist) otherwise — an unauthed hub must never expose a way to
+// kill the process. Deliveries are verified GitHub's documented way: HMAC-SHA256
+// of the raw body keyed on the secret, constant-time compared against the
+// `X-Hub-Signature-256` header. There is no token in the URL and no GET — a bare
+// GET could otherwise be triggered by a crawler/prefetch and take the hub down.
+
+const WEBHOOK_PATH = "/webhookforgitHub";
+// Cap the buffered body hard. Push payloads are small (a few KiB); anything
+// larger is refused rather than grown in memory — we only need the bytes to HMAC.
+const WEBHOOK_MAX_BODY = 1024 * 1024;
+
+// Verify a GitHub webhook delivery: HMAC-SHA256(raw body, secret), hex, compared
+// in constant time against the `sha256=<hex>` value GitHub sends in
+// `X-Hub-Signature-256`. Mirrors docs.github.com "Validating webhook deliveries".
+function githubSignatureOk(header, body, secret) {
+  if (typeof header !== "string") return false;
+  const expected = "sha256=" + createHmac("sha256", secret).update(body).digest("hex");
+  const a = Buffer.from(header);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// Handle POST /webhookforgitHub. Returns true once it has answered the request
+// (so the static handler stops), false if the path isn't ours. `ctx` is
+// `{ token, onTrigger }` — `onTrigger` (late-bound to the hub's shutdown) fires
+// only after a delivery authenticates.
+function handleGithubWebhook(req, res, url, ctx) {
+  if (url.pathname !== WEBHOOK_PATH) return false;
+  // Route only exists when a secret is configured (else 404, like /metrics).
+  if (!ctx?.token) { res.writeHead(404, { "content-type": "text/plain" }).end("not found"); return true; }
+  if (req.method !== "POST") {
+    res.writeHead(405, { "content-type": "text/plain", allow: "POST" }).end("method not allowed");
+    return true;
+  }
+  const chunks = [];
+  let size = 0;
+  let aborted = false;
+  req.on("data", (c) => {
+    if (aborted) return;
+    size += c.length;
+    if (size > WEBHOOK_MAX_BODY) {
+      aborted = true;
+      res.writeHead(413, { "content-type": "text/plain" }).end("payload too large");
+      req.destroy();
+      return;
+    }
+    chunks.push(c);
+  });
+  req.on("end", () => {
+    if (aborted) return;
+    const body = Buffer.concat(chunks);
+    if (!githubSignatureOk(req.headers["x-hub-signature-256"], body, ctx.token)) {
+      warn(`github webhook: bad/missing signature from ${clientIp(req)} — rejected 401`);
+      res.writeHead(401, { "content-type": "text/plain" }).end("unauthorized");
+      return;
+    }
+    // Authenticated delivery. Ack GitHub (so the delivery shows as succeeded),
+    // then stop the hub — the supervisor pulls the new code and restarts us.
+    const event = String(req.headers["x-github-event"] || "?");
+    log(`github webhook: authenticated ${event} delivery — stopping hub for redeploy`);
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end(req.method === "HEAD" ? undefined : "ok — stopping for redeploy\n");
+    ctx.onTrigger?.();
+  });
+  return true;
+}
+
 // Serve one buffer with the right cache tag + conditional-GET (304) support.
 function sendBuffer(req, res, cfg, tag, servedPath, buf) {
   const etag = etagOf(buf);
@@ -245,19 +319,22 @@ function sendBuffer(req, res, cfg, tag, servedPath, buf) {
 // hashing is enabled, the in-memory fingerprinted assets (else `null`). `metrics`
 // is a late-bound context `{ token, render }` — `render` is set once the hub's
 // live state (wss/rooms/logs) exists; a request reads it at scrape time.
-function makeServeStatic(cfg, assets, metrics, forceHttps) {
+function makeServeStatic(cfg, assets, metrics, forceHttps, webhook) {
   return function serveStatic(req, res) {
     // Upgrade an insecure request before anything else (see forcedHttpsRedirect).
     if (forceHttps && forcedHttpsRedirect(req, res)) return;
 
     setSecurityHeaders(res);
 
+    const url = new URL(req.url, "http://localhost");
+    // The GitHub deploy webhook is a POST — handle it before the GET/HEAD guard.
+    if (handleGithubWebhook(req, res, url, webhook)) return;
+
     if (req.method !== "GET" && req.method !== "HEAD") {
       res.writeHead(405, { "content-type": "text/plain", allow: "GET, HEAD" }).end("method not allowed");
       return;
     }
 
-    const url = new URL(req.url, "http://localhost");
     debug(`http ${req.method} ${url.pathname} from ${clientIp(req)}`);
     if (url.pathname === "/healthz") {
       res.writeHead(200, { "content-type": "text/plain" }).end("ok");
@@ -379,6 +456,13 @@ export function createHub(opts = {}) {
   const peerMaxMessageBytes = opts.peerMaxMessageBytes ??
     num(process.env.SIANO_PEER_MAX_MSG_BYTES, 16 * 1024 * 1024);
 
+  // GitHub deploy webhook: a shared secret gates POST /webhookforgitHub, which
+  // authenticates the delivery (HMAC over the body) and then stops the hub for an
+  // external supervisor to redeploy. Empty ⇒ route off (404). `onTrigger` is
+  // late-bound below once `shutdown` exists (default: graceful stop then exit).
+  const githubWebhookToken = opts.githubWebhookToken ?? process.env.SIANO_GITHUB_WEBHOOK ?? "";
+  const webhookCtx = { token: githubWebhookToken, onTrigger: null };
+
   // Prometheus metrics: a bearer token gates GET /metrics; empty ⇒ endpoint off.
   const metricsToken = opts.metricsToken ?? process.env.SIANO_METRICS_TOKEN ?? "";
   const metrics = new Metrics();
@@ -416,7 +500,7 @@ export function createHub(opts = {}) {
     : truthy(process.env.SIANO_FORCE_HTTPS || "");
 
   const cacheCfg = resolveCacheConfig(opts, !!assets);
-  const httpServer = http.createServer(makeServeStatic(cacheCfg, assets, metricsCtx, forceHttps));
+  const httpServer = http.createServer(makeServeStatic(cacheCfg, assets, metricsCtx, forceHttps, webhookCtx));
   // Slowloris / stuck-request guards (belt-and-braces behind Cloudflare).
   httpServer.headersTimeout = 15000;
   httpServer.requestTimeout = 30000;
@@ -614,6 +698,13 @@ export function createHub(opts = {}) {
     await logs.flush();
   }
 
+  // Wire the GitHub deploy webhook now that `shutdown` exists. A caller (or a
+  // test) can override with opts.onGithubWebhook; the default gracefully stops
+  // the hub and exits so the supervisor restarts us on the freshly pulled code.
+  webhookCtx.onTrigger = opts.onGithubWebhook ?? (() => {
+    shutdown().then(() => process.exit(0));
+  });
+
   // Open the always-on outbound peer links now (independent of any trip/leaf).
   // Inert when no SIANO_PEER_URL is configured (a passive listener still accepts
   // inbound peer links via wss.on("connection") above).
@@ -645,6 +736,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
     log(`  static cache: assets="${show(cc.asset)}" cdn="${show(cc.cdn)}" sw="${show(cc.sw)}"` +
       `${!hub.assets && cc.asset === "no-cache" ? " (dev default — revalidate always)" : ""}`);
     log(`  metrics    : ${process.env.SIANO_METRICS_TOKEN ? "on — GET /metrics (Bearer token) for Prometheus/Grafana" : "off (set SIANO_METRICS_TOKEN to expose /metrics)"}`);
+    log(`  gh webhook : ${process.env.SIANO_GITHUB_WEBHOOK ? "on — POST /webhookforgitHub (HMAC-signed) stops the hub for a supervisor to redeploy" : "off (set SIANO_GITHUB_WEBHOOK to enable the deploy webhook)"}`);
     log(`  force https: ${hub.forceHttps ? "on — 301 to https:// when X-Forwarded-Proto=http" : "off (set SIANO_FORCE_HTTPS=1 behind a TLS-terminating proxy)"}`);
     log(`  debug logs : ${DEBUG ? "on" : "off (set SIANO_DEBUG=1 for per-request/op logs)"}`);
     if (HOST === "127.0.0.1" || HOST === "localhost") {
