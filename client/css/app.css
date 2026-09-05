@@ -1920,6 +1920,19 @@ table.report thead th.name {
   z-index: 3;
   background: var(--card-sticky);
 }
+/* Header repeated inside the body every N rows so the column labels stay in
+   sight when a long trip's table is scrolled. Styled like the real header, but
+   NOT sticky — it scrolls with the rows as a periodic label reminder. */
+table.report tbody tr.matrix-head th,
+table.report tbody tr.matrix-head td {
+  background: var(--card-sticky);
+  color: var(--slate-300);
+  font-weight: var(--fw-bold);
+  font-family: inherit;
+}
+table.report tbody tr.matrix-head th.name {
+  background: var(--card-sticky);
+}
 table.report tbody td {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--slate-200);

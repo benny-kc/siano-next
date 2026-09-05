@@ -27,7 +27,7 @@ import { installState } from "./install.js";
 import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 3);
+registerVersion("js/ui/board.js", 4);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -731,7 +731,10 @@ function renderReport(snap) {
   const netTotal = rep.grandTotalCents - rep.consumedTotalCents;
 
   // Header: Bill · Payer · Total · <each traveller> · Diff
-  const head = el("tr", {},
+  // A factory, not a single node — a DOM element can only live in one place, and
+  // we repeat the header inside the body every REPEAT_HEADER_EVERY rows so the
+  // column labels stay in sight when a long trip's table is scrolled.
+  const makeHead = () => el("tr", { class: "matrix-head" },
     el("th", { class: "name" }, "Bill"),
     el("th", { class: "left" }, "Payer"),
     el("th", {}, "Total"),
@@ -739,8 +742,13 @@ function renderReport(snap) {
     el("th", { class: "muted" }, "Diff"),
   );
 
-  const body = rep.bills.map((b) =>
-    el("tr", { class: b.complete ? "" : "draft" },
+  const REPEAT_HEADER_EVERY = 20;
+  const body = [];
+  rep.bills.forEach((b, i) => {
+    // Re-emit the header row every REPEAT_HEADER_EVERY bills (never before the
+    // first row — that's the thead's job).
+    if (i > 0 && i % REPEAT_HEADER_EVERY === 0) body.push(makeHead());
+    body.push(el("tr", { class: b.complete ? "" : "draft" },
       el("th", { class: "name" }, `${b.emoji || "🍽️"} ${b.name || "Untitled"}`,
         b.complete ? null : el("span", { class: "draft-tag" }, " · draft")),
       el("td", { class: "left" }, b.payerName || "—"),
@@ -751,6 +759,7 @@ function renderReport(snap) {
           : el("td", {}, reportDash())),
       el("td", { class: b.diffCents === 0 ? "muted" : "neg" }, b.diffCents === 0 ? "—" : format(b.diffCents)),
     ));
+  });
 
   const foot = el("tfoot", {},
     el("tr", { class: "sum" },
@@ -777,7 +786,7 @@ function renderReport(snap) {
   );
 
   const table = el("table", { class: "report matrix" },
-    el("thead", {}, head), el("tbody", {}, ...body), foot);
+    el("thead", {}, makeHead()), el("tbody", {}, ...body), foot);
 
   const kids = [
     el("h3", {}, "Bills — each traveller's share"),
