@@ -373,6 +373,11 @@ export function createHub(opts = {}) {
   const peerUrls = String(opts.peerUrls ?? process.env.SIANO_PEER_URL ?? "")
     .split(",").map((s) => s.trim()).filter(Boolean);
   const peerToken = opts.peerToken ?? process.env.SIANO_PEER_TOKEN ?? "";
+  // A peer link multiplexes every trip over one socket, so its reconciliation
+  // frames (`phave`/`pops`) carry far more than a single leaf's op — give peer
+  // connections a much larger frame cap than ordinary clients.
+  const peerMaxMessageBytes = opts.peerMaxMessageBytes ??
+    num(process.env.SIANO_PEER_MAX_MSG_BYTES, 16 * 1024 * 1024);
 
   // Prometheus metrics: a bearer token gates GET /metrics; empty ⇒ endpoint off.
   const metricsToken = opts.metricsToken ?? process.env.SIANO_METRICS_TOKEN ?? "";
@@ -436,13 +441,17 @@ export function createHub(opts = {}) {
     for (const c of room) if (c !== except) c.send(str);
   };
 
-  // Lazy per-trip hub-to-hub links. `ensure(trip)` (called on every hello) dials
-  // configured peers the first time a local leaf touches a trip; `broadcast`
-  // forwards local-leaf ops to them. A no-peer-URL hub gets an inert manager.
-  const peers = createPeers({ urls: peerUrls, token: peerToken, logs, fanout, warn, debug, metrics });
-  let peerNoTokenWarned = false;
+  // Hub-to-hub sync: ONE always-on multiplexed link per configured peer URL,
+  // opened at startup (below) and kept up forever. `broadcastOps` forwards local
+  // ops to every peer link; inbound peer conns are adopted via `onInboundConn`.
+  // A no-peer-URL hub still accepts inbound peer links (a passive listener).
+  const peers = createPeers({
+    urls: peerUrls, token: peerToken, logs, fanout, isValidTrip: isValidTripId, warn, debug, metrics,
+  });
 
-  const wss = new WebSocketServer(httpServer, { maxMessageBytes, maxConnections, allowedOrigins });
+  const wss = new WebSocketServer(httpServer, {
+    maxMessageBytes, peerMaxMessageBytes, maxConnections, allowedOrigins,
+  });
 
   // Now that the live state exists, wire the metrics scrape to sample it.
   const countInboundPeers = () => {
@@ -468,13 +477,29 @@ export function createHub(opts = {}) {
   wss.on("connection", (conn, req) => {
     conn.ip = clientIp(req);
     metrics.wsOpened += 1;
+
+    // A hub-to-hub peer link (offered the `siano-peer` subprotocol) speaks the
+    // multiplexed peer protocol, not the leaf protocol — hand it to the peer
+    // manager and skip the leaf message/rate-limit wiring entirely. It's
+    // authenticated by token inside `phello` (peer.js), heartbeated by the loop
+    // below (it's in wss.connections), and exempt from the per-connection rate
+    // limit because one link relays every trip's traffic.
+    if (conn.isPeer) {
+      debug(`ws peer open from ${conn.ip}; ${wss.connections.size} live`);
+      peers.onInboundConn(conn);
+      conn.on("close", () => {
+        metrics.wsClosed += 1;
+        debug(`ws peer close ip=${conn.ip}; ${wss.connections.size} live`);
+      });
+      return;
+    }
+
     debug(`ws open from ${conn.ip} (origin ${req.headers.origin || "none"}); ${wss.connections.size} live`);
 
     conn.on("message", async (data) => {
-      // Peer hubs relay a whole trip's traffic over one link and would trip the
-      // per-connection rate limit meant for a single device — exempt them (they
-      // are authenticated by token in `hello`).
-      if (!conn.isPeer && !allow(conn)) {
+      // Only leaf (client) connections reach here — peer links are routed to the
+      // peer manager above and never hit the per-connection rate limit.
+      if (!allow(conn)) {
         metrics.rateLimitCloses += 1;
         warn(`ws rate limit hit (${maxMsgsPerSec}/s) trip=${conn.trip || "?"} ip=${conn.ip} — closing 1008`);
         conn.close(1008); // policy violation — too chatty
@@ -493,23 +518,6 @@ export function createHub(opts = {}) {
       metrics.messages += 1;
 
       if (msg.t === "hello") {
-        // A peer hub (offered the `siano-peer` subprotocol) is authenticated by
-        // a shared token. With a token configured, a mismatch is closed 1008;
-        // with none configured we accept it but warn loudly once (the operator
-        // chose the open default — set SIANO_PEER_TOKEN on BOTH hubs to close it).
-        if (conn.isPeer) {
-          if (peerToken) {
-            if (msg.token !== peerToken) {
-              metrics.peerAuthFail();
-              warn(`ws peer auth failed from ${conn.ip} — closing 1008`);
-              conn.close(1008);
-              return;
-            }
-          } else if (!peerNoTokenWarned) {
-            peerNoTokenWarned = true;
-            warn(`ws peer connected WITHOUT a token from ${conn.ip} — any client offering the peer subprotocol can inject ops. Set SIANO_PEER_TOKEN on both hubs.`);
-          }
-        }
         if (!isValidTripId(msg.trip)) {
           warn(`ws invalid trip id from ${conn.ip}: ${JSON.stringify(msg.trip)?.slice(0, 40)} — closing 1008`);
           conn.close(1008);
@@ -517,10 +525,6 @@ export function createHub(opts = {}) {
         }
         conn.trip = msg.trip;
         join(msg.trip, conn);
-        // Ensure this trip is also linked to any configured peer hubs (lazy: the
-        // link opens the first time a local leaf — or an inbound peer — touches
-        // the trip). Inert on a hub with no SIANO_PEER_URL.
-        peers.ensure(msg.trip);
         const delta = logs.missing(msg.trip, msg.have);
         // The other direction: op-ids the leaf says it has that we don't. These
         // are ops it created while offline (they only ever hit its IndexedDB);
@@ -545,10 +549,8 @@ export function createHub(opts = {}) {
           metrics.appended(conn.trip);
           debug(`ws op trip=${conn.trip} ${opBrief(msg.op)} -> fanout`);
           fanout(conn.trip, { t: "op", op: msg.op }, conn);
-          // Forward a local leaf's op to peer hubs. Skip ops that arrived FROM a
-          // peer (conn.isPeer) — those are relayed to local leaves above and must
-          // not bounce back to their origin hub.
-          if (!conn.isPeer) peers.broadcast(conn.trip, { t: "op", op: msg.op });
+          // Forward the local leaf's op to every peer hub over the always-on link.
+          peers.broadcastOp(conn.trip, msg.op);
         } else {
           metrics.rejected();
           debug(`ws op trip=${conn.trip} ${opBrief(msg.op)} -> dup/capped (no fanout)`);
@@ -562,7 +564,7 @@ export function createHub(opts = {}) {
         debug(`ws ops trip=${conn.trip} received=${msg.ops.length} new=${added.length}`);
         if (added.length) {
           fanout(conn.trip, { t: "ops", ops: added }, conn);
-          if (!conn.isPeer) peers.broadcast(conn.trip, { t: "ops", ops: added });
+          peers.broadcastOps(conn.trip, added);
         }
       } else {
         debug(`ws unknown message t=${msg.t} trip=${conn.trip} — ignored`);
@@ -612,7 +614,12 @@ export function createHub(opts = {}) {
     await logs.flush();
   }
 
-  return { httpServer, wss, logs, peers, dataDir, cacheCfg, assets, forceHttps, shutdown };
+  // Open the always-on outbound peer links now (independent of any trip/leaf).
+  // Inert when no SIANO_PEER_URL is configured (a passive listener still accepts
+  // inbound peer links via wss.on("connection") above).
+  peers.start();
+
+  return { httpServer, wss, logs, peers, metrics, dataDir, cacheCfg, assets, forceHttps, shutdown };
 }
 
 // Auto-start only when run directly (`node hub/server.js`), not when imported.
@@ -630,7 +637,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
       ` ops/trip=${num(process.env.SIANO_MAX_OPS_PER_TRIP, 0) || "∞"}` +
       ` trips=${num(process.env.SIANO_MAX_TRIPS, 0) || "∞"}`);
     log(`  origins    : ${process.env.SIANO_ALLOWED_ORIGINS || "(any — allowlist off)"}`);
-    log(`  peer sync  : ${process.env.SIANO_PEER_URL ? `dialing ${process.env.SIANO_PEER_URL}` : "off (set SIANO_PEER_URL=wss://other-hub to sync two hubs)"}` +
+    log(`  peer sync  : ${process.env.SIANO_PEER_URL ? `always-on link → ${process.env.SIANO_PEER_URL}` : "passive (accepts inbound peer links; set SIANO_PEER_URL=wss://other-hub to dial one)"}` +
       `${process.env.SIANO_PEER_URL || process.env.SIANO_PEER_TOKEN ? (process.env.SIANO_PEER_TOKEN ? " (token set)" : " ⚠ NO SIANO_PEER_TOKEN — set it on both hubs") : ""}`);
     const cc = hub.cacheCfg.raw;
     const show = (v) => (v === "" ? "(omitted)" : v);

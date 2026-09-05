@@ -81,8 +81,12 @@ returning leaf the delta. **No business logic on the hub** — it literally cann
 compute a balance. This keeps "all logic in static files on the client" true.
 
 Two hubs can also replicate to **each other**: because ops are content-addressed
-+ deduped and the reducer is order-independent, a hub can dial a peer hub and
-speak the very same client sync protocol per trip — it's just a "big leaf." See
++ deduped and the reducer is order-independent, a hub can dial a peer hub over
+**one always-on link that multiplexes every trip** and treat it as a "big leaf."
+The link is active whenever the hub is up (not opened lazily per trip), so a hub
+never holds data it can't send — if the link is down the peer is down, and the
+backlog flushes via a union-of-trips reconciliation the instant it reconnects. A
+hub with no peer URL is a passive listener; a single dial is bidirectional. See
 `hub/peer.js` and *Hub-to-hub sync* in docs/security.md. (Sharing one log
 *directory* between two processes is **not** enough for live sync — each hub
 caches a trip in memory and never re-reads the file, so they'd never see each
@@ -184,10 +188,11 @@ order-independent convergence), the IndexedDB op-log store, the WebSocket sync
 client, the dependency-free Node hub (fan-out + delta-on-reconnect), and a
 minimal functional board.
 
-Also built: **hub-to-hub sync** (`hub/peer.js`) — a hub dials a peer and
-replicates a trip's op-log over the client protocol (lazy per-trip, token-authed,
-self-healing on reconnect); tested in `test/peer.test.mjs`.
+Also built: **hub-to-hub sync** (`hub/peer.js`) — a hub keeps ONE always-on link
+per peer that multiplexes every trip, reconciling the union of both hubs' trips
+on each (re)connect and streaming live edits after; token-authed and self-healing,
+it converges two hubs, a star, a chain, or a mesh; tested in `test/peer.test.mjs`.
 
 **Next** (see `README.md` roadmap): the photo/OCR blob channel; per-device
 keypair signing of ops; log compaction (snapshot + tail) for long-lived trips;
-transitive (3+ hub chain) peer relay.
+digest-based peer reconciliation for very large hubs.
