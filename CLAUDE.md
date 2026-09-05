@@ -160,12 +160,12 @@ Create ops via the `ops.js` constructors (they stamp the clock). Emit them throu
 | `hub/server.js` | `createHub({...})` factory (returns `{ httpServer, wss, logs, shutdown }`) + static server (env-controlled cache headers + optional asset hashing) + relay + heartbeat + logging + graceful shutdown. Auto-starts when run directly. |
 | `hub/assets.js` | `buildAssets(clientDir)` — in-memory content-hash fingerprinting: rewrites the ESM import graph + `index.html` + service worker to `…<hash>.js` URLs (dependency-ordered; throws on an import cycle). Enabled by `SIANO_ASSET_HASHING`. |
 | `hub/metrics.js` | `Metrics` (lifetime counters the hub bumps) + `render(metrics, live)` — Prometheus text exposition served at `GET /metrics`. **Token-gated (`SIANO_METRICS_TOKEN`), off (404) when unset** — series leak trip ids/volume. Covers client traffic, per-trip series, process, AND the **peer link** (`siano_peer_*`: link up/down, ops in/out, reconnects, inbound conns, auth failures). Dependency-free; scrape it with Grafana Alloy/Agent → Grafana Cloud (see docs/security.md → *Metrics / monitoring*). NB the peer counter Map fields (`peerOpsIn`/`peerOpsOut`) and the record methods (`peerRecvOps`/`peerSentOps`) are deliberately named differently — a same-named instance field would shadow the prototype method. |
-| `hub/peer.js` | `createPeers({...})` — **hub-to-hub sync**. A hub *dials* peer hubs (`SIANO_PEER_URL`) and speaks the same client protocol per trip (a hub is "just a big leaf"). Lazy per-trip links (opened on first `hello` for a trip), reconnect/backoff, token auth (`SIANO_PEER_TOKEN`), fan peer ops to LOCAL leaves + forward local-leaf ops to peers. Peer conns offer the `siano-peer` subprotocol (Origin-exempt, rate-limit-exempt). Ops from a peer are never re-forwarded to other peers — dedup keeps a mesh correct but Phase 1 targets 2-hub + star (not a transitive chain). See docs/security.md → *Hub-to-hub sync*. |
+| `hub/peer.js` | `createPeers({...})` — **hub-to-hub sync (Phase 2: one always-on multiplexed link per peer)**. A hub *dials* each `SIANO_PEER_URL` at startup and keeps that ONE socket up forever (reconnect/backoff), carrying EVERY trip (each frame names its `trip`). Not lazy — the link exists whenever the hub is up, so there's never data with nowhere to send it (link down ⇒ peer down ⇒ flushes on reconnect). A hub with no `SIANO_PEER_URL` is a **passive listener** (accepts inbound peer links; a single dial is bidirectional). Peer protocol: `phello`(token)→`ptrips`→`phave`/`pwant`/`pops`; on (re)connect the dialer reconciles the UNION of both hubs' trips (backlog both ways), then live ops flow as `pops`. Ingested peer ops fan to LOCAL leaves AND re-forward to OTHER peer links (dedup stops loops) — so 2-hub, star, chain, and mesh all converge. Peer conns offer the `siano-peer` subprotocol (Origin-exempt, rate-limit-exempt, larger frame cap `SIANO_PEER_MAX_MSG_BYTES`). Token auth (`SIANO_PEER_TOKEN`; unset ⇒ accept + warn once). See docs/security.md → *Hub-to-hub sync*. |
 
 **Tests (`test/*.mjs`, `node --test`):** `split`, `money`, `budgets`, `reducer`
 (merge rules + order-independent convergence), `hub` (real WS framing, fan-out,
-delta), `peer` (two real hubs: bidirectional hub-to-hub convergence over a single
-dial, durability, token auth), `security` (caps, oversized-message close,
+delta), `peer` (two real hubs: one multiplexed always-on link syncing many trips
+both ways, backlog flush on reconnect, token auth), `security` (caps, oversized-message close,
 Origin/trip-id rejection, rate limit, headers), `metrics` (token-gated
 `/metrics`: 404 when off, bearer auth, live + per-trip series).
 
@@ -209,7 +209,7 @@ Full detail in **docs/security.md**. Key points:
 `HOST`, `PORT`, `SIANO_DATA_DIR`, `SIANO_MAX_MSG_BYTES`, `SIANO_MAX_CONNECTIONS`,
 `SIANO_MAX_MSGS_PER_SEC`, `SIANO_ALLOWED_ORIGINS`, `SIANO_MAX_OPS_PER_TRIP`,
 `SIANO_MAX_TRIPS`, `SIANO_HEARTBEAT_MS`, `SIANO_TRIP_ID_MAX`, `SIANO_PEER_URL`,
-`SIANO_PEER_TOKEN`, `SIANO_METRICS_TOKEN`, `SIANO_DEBUG`, `SIANO_CLIENT_DEBUG`,
+`SIANO_PEER_TOKEN`, `SIANO_PEER_MAX_MSG_BYTES`, `SIANO_METRICS_TOKEN`, `SIANO_DEBUG`, `SIANO_CLIENT_DEBUG`,
 `SIANO_ASSET_HASHING`, `SIANO_CACHE_CONTROL`, `SIANO_CDN_CACHE_CONTROL`,
 `SIANO_SW_CACHE_CONTROL`, `SIANO_FORCE_HTTPS`.
 Defaults + meanings are tabled in docs/security.md.
@@ -360,11 +360,16 @@ keep them fixed.
 - **Per-device keypair signing of ops** (tamper-evidence + authorship; trip URL
   stays the capability).
 - **Log compaction** (snapshot + tail) for long-lived trips — also bounds disk.
-- **Multi-hub sync** ✅ *(Phase 1 done)* — `hub/peer.js`: a hub dials a peer
-  (`SIANO_PEER_URL`) and replicates a trip's op-log over the client protocol
-  (lazy per-trip, token-authed via `SIANO_PEER_TOKEN`, self-healing). Covers
-  two hubs (single dial is bidirectional) and a star (spokes → one hub). Next:
-  transitive relay across a 3+ hub chain, and a shared-secret/Access story for
+- **Multi-hub sync** ✅ *(Phase 2 done)* — `hub/peer.js`: a hub dials each
+  `SIANO_PEER_URL` and keeps ONE always-on link up (reconnect/backoff) that
+  **multiplexes every trip**. Active, not lazy — the link exists whenever the hub
+  is up, so a hub is never holding data it can't send (link down ⇒ the peer is
+  down ⇒ the backlog flushes via union reconciliation the moment the link
+  returns). A hub with no `SIANO_PEER_URL` is a passive listener; one dial is
+  bidirectional. Ingested peer ops re-forward to other peer links (dedup stops
+  loops), so 2-hub, star, chain, and mesh all converge. Token-authed
+  (`SIANO_PEER_TOKEN`). Next: digest-based reconciliation (avoid re-sending every
+  op-id on reconnect for very large hubs), and a shared-secret/Access story for
   federating hubs you don't both operate. (NB: sharing one log *directory*
   between hubs is **not** live sync — each caches trips in memory; the peer link
   is the mechanism.)

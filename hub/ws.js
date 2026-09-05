@@ -35,6 +35,8 @@ export class WebSocketServer extends EventEmitter {
    * @param {import("node:http").Server} httpServer
    * @param {{
    *   maxMessageBytes?: number,   // largest single (possibly fragmented) message
+   *   peerMaxMessageBytes?: number, // …for hub-to-hub peer links (reconciliation
+   *                                 //   frames carry many ops/op-ids at once)
    *   maxConnections?: number,    // hard cap on concurrent sockets
    *   allowedOrigins?: Set<string>|null, // if set, Origin must be a member
    * }} [opts]
@@ -42,6 +44,7 @@ export class WebSocketServer extends EventEmitter {
   constructor(httpServer, opts = {}) {
     super();
     this.maxMessageBytes = opts.maxMessageBytes ?? 256 * 1024;
+    this.peerMaxMessageBytes = opts.peerMaxMessageBytes ?? this.maxMessageBytes;
     this.maxConnections = opts.maxConnections ?? 500;
     this.allowedOrigins = opts.allowedOrigins ?? null;
     this.connections = new Set();
@@ -106,7 +109,11 @@ export class WebSocketServer extends EventEmitter {
         `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
     );
 
-    const conn = new Conn(socket, req, this.maxMessageBytes);
+    // Peer links get a larger frame cap — a multiplexed link reconciles many
+    // trips over one socket, so its `phave`/`pops` frames carry far more than a
+    // single leaf's op. They're token-authed and operator-run, so the wider cap
+    // is an accepted trade (see docs/security.md → Hub-to-hub sync).
+    const conn = new Conn(socket, req, isPeer ? this.peerMaxMessageBytes : this.maxMessageBytes);
     conn.isPeer = isPeer;
     this.connections.add(conn);
     conn.on("close", () => this.connections.delete(conn));

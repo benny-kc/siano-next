@@ -1,7 +1,8 @@
-// End-to-end test of hub-to-hub replication (hub/peer.js): two real hubs on two
-// ports, one dialing the other, with real WebSocket framing. Verifies lazy
-// per-trip linking, convergence in BOTH directions (a single dial is
-// bidirectional), durability of replicated ops, and shared-token auth.
+// End-to-end tests of Phase 2 hub-to-hub replication (hub/peer.js): ONE always-on
+// multiplexed link per peer that carries EVERY trip. Two real hubs on two ports,
+// real WebSocket framing. Verifies: many trips over a single link, bidirectional
+// convergence over one dial, that a backlog created while the link is down
+// flushes on reconnect (no data ever stuck), and shared-token auth.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -12,173 +13,158 @@ import { createHub } from "../hub/server.js";
 import { Clock, opId } from "../client/js/core/lamport.js";
 import * as ops from "../client/js/core/ops.js";
 
-function listen(httpServer) {
-  return new Promise((resolve) => httpServer.listen(0, () => resolve(httpServer.address().port)));
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function mkHub(t, opts) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "siano-p2-"));
+  const hub = createHub({ dataDir: dir, ...opts });
+  return new Promise((resolve) => {
+    hub.httpServer.listen(0, () => {
+      const port = hub.httpServer.address().port;
+      t.after(async () => {
+        await hub.shutdown();
+        fs.rmSync(dir, { recursive: true, force: true });
+      });
+      resolve({ hub, port, dir, url: `ws://127.0.0.1:${port}` });
+    });
+  });
 }
-function open(url) {
+
+function wsOpen(url) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url);
     ws.onopen = () => resolve(ws);
     ws.onerror = (e) => reject(e);
   });
 }
-function next(ws, predicate) {
+function nextMsg(ws, pred) {
   return new Promise((resolve, reject) => {
     const to = setTimeout(() => reject(new Error("timed out waiting for message")), 3000);
-    ws.addEventListener("message", function handler(ev) {
-      const msg = JSON.parse(ev.data);
-      if (!predicate || predicate(msg)) {
+    ws.addEventListener("message", function h(ev) {
+      const m = JSON.parse(ev.data);
+      if (!pred || pred(m)) {
         clearTimeout(to);
-        ws.removeEventListener("message", handler);
-        resolve(msg);
+        ws.removeEventListener("message", h);
+        resolve(m);
       }
     });
   });
 }
-// Collect ops from any `op`/`sync`/`ops` frames until we've seen the wanted ids.
-function collectOps(ws, wantIds) {
+
+// Write ops into `trip` on the hub at `port` via an ordinary leaf connection.
+async function leafSend(port, trip, opList) {
+  const ws = await wsOpen(`ws://127.0.0.1:${port}`);
+  ws.send(JSON.stringify({ t: "hello", trip, have: [] }));
+  await nextMsg(ws, (m) => m.t === "sync");
+  for (const op of opList) ws.send(JSON.stringify({ t: "op", op }));
+  await delay(60); // let the frames reach + append on the hub before closing
+  ws.close();
+}
+
+// Poll a hub (via short-lived leaf hellos) until `trip`'s log contains all of
+// `wantIds`, or time out. Returns the trip's ops. Deterministic regardless of
+// reconciliation timing.
+async function pollTrip(port, trip, wantIds, timeout = 5000) {
   const want = new Set(wantIds);
-  const got = new Map();
-  return new Promise((resolve, reject) => {
-    const to = setTimeout(() => reject(new Error(`timed out; saw ${[...got.keys()]}`)), 4000);
-    ws.addEventListener("message", function handler(ev) {
-      const msg = JSON.parse(ev.data);
-      const batch = msg.op ? [msg.op] : Array.isArray(msg.ops) ? msg.ops : [];
-      for (const o of batch) if (want.has(opId(o))) got.set(opId(o), o);
-      if ([...want].every((id) => got.has(id))) {
-        clearTimeout(to);
-        ws.removeEventListener("message", handler);
-        resolve(got);
-      }
-    });
-  });
-}
-
-function twoHubs(t, { token } = {}) {
-  const dirA = fs.mkdtempSync(path.join(os.tmpdir(), "siano-peerA-"));
-  const dirB = fs.mkdtempSync(path.join(os.tmpdir(), "siano-peerB-"));
-  return (async () => {
-    // Hub A accepts peers; hub B dials A. A single dial is bidirectional.
-    const hubA = createHub({ dataDir: dirA, peerToken: token });
-    const portA = await listen(hubA.httpServer);
-    const hubB = createHub({
-      dataDir: dirB,
-      peerUrls: [`ws://127.0.0.1:${portA}`],
-      peerToken: token,
-    });
-    const portB = await listen(hubB.httpServer);
-    t.after(async () => {
-      await hubB.shutdown();
-      await hubA.shutdown();
-      fs.rmSync(dirA, { recursive: true, force: true });
-      fs.rmSync(dirB, { recursive: true, force: true });
-    });
-    return { hubA, hubB, portA, portB };
-  })();
-}
-
-test("two hubs converge in both directions over a single dial", async (t) => {
-  const { portA, portB } = await twoHubs(t);
-  const trip = "trip-peer";
-
-  // A leaf on hub A creates an op the peer link should carry to hub B.
-  const A = new Clock("A");
-  const wsA = await open(`ws://127.0.0.1:${portA}`);
-  wsA.send(JSON.stringify({ t: "hello", trip, have: [] }));
-  await next(wsA, (m) => m.t === "sync");
-  const op1 = ops.setTripName(A, "Rome");
-  wsA.send(JSON.stringify({ t: "op", op: op1 }));
-
-  // A leaf joins hub B. That join lazily opens B's peer link to A, which pulls
-  // op1 down and fans it out to this leaf.
-  const wsB = await open(`ws://127.0.0.1:${portB}`);
-  const gotByB = collectOps(wsB, [opId(op1)]);
-  wsB.send(JSON.stringify({ t: "hello", trip, have: [] }));
-  const b = await gotByB;
-  assert.equal(b.get(opId(op1)).op, "set_trip_name", "op made on hub A reached hub B");
-
-  // Reverse direction: an op on hub B must reach hub A over the same link.
-  const B = new Clock("B");
-  for (const o of b.values()) B.observe(o);
-  const op2 = ops.addMember(B, "m1", { name: "Ann" });
-  const gotByA = collectOps(wsA, [opId(op2)]);
-  wsB.send(JSON.stringify({ t: "op", op: op2 }));
-  const a = await gotByA;
-  assert.equal(a.get(opId(op2)).memberId, "m1", "op made on hub B reached hub A");
-
-  // Both ops are now durable on BOTH hubs: a fresh late joiner on each gets both.
-  for (const port of [portA, portB]) {
-    const wsC = await open(`ws://127.0.0.1:${port}`);
-    wsC.send(JSON.stringify({ t: "hello", trip, have: [] }));
-    const sync = await next(wsC, (m) => m.t === "sync" && m.ops.length >= 2);
-    assert.deepEqual(
-      sync.ops.map((o) => o.op).sort(),
-      ["add_member", "set_trip_name"],
-      `hub on :${port} durably holds both ops`,
-    );
-    wsC.close();
+  const deadline = Date.now() + timeout;
+  let last = [];
+  while (Date.now() < deadline) {
+    const ws = await wsOpen(`ws://127.0.0.1:${port}`);
+    ws.send(JSON.stringify({ t: "hello", trip, have: [] }));
+    const sync = await nextMsg(ws, (m) => m.t === "sync");
+    ws.close();
+    last = sync.ops || [];
+    const ids = new Set(last.map(opId));
+    if ([...want].every((id) => ids.has(id))) return last;
+    await delay(100);
   }
+  throw new Error(`trip ${trip} on :${port} never got ${[...want]} — had ${last.map(opId)}`);
+}
 
-  wsA.close();
-  wsB.close();
+const countInboundPeers = (hub) => [...hub.wss.connections].filter((c) => c.isPeer).length;
+
+test("one always-on link multiplexes many trips, both directions", async (t) => {
+  const token = "s3cret";
+  const A = await mkHub(t, { peerToken: token }); // passive listener
+  const B = await mkHub(t, { peerUrls: [A.url], peerToken: token }); // dials A
+
+  // Seed TWO different trips on A.
+  const ca = new Clock("A");
+  const t1 = "trip-one", t2 = "trip-two";
+  const a1 = ops.setTripName(ca, "Rome");
+  const a2 = ops.addMember(ca, "m1", { name: "Ann" });
+  await leafSend(A.port, t1, [a1]);
+  await leafSend(A.port, t2, [a2]);
+
+  // Both trips reach B over the single multiplexed link.
+  await pollTrip(B.port, t1, [opId(a1)]);
+  await pollTrip(B.port, t2, [opId(a2)]);
+
+  // Reverse direction on a THIRD trip: created on B, must reach A live.
+  const cb = new Clock("B");
+  const t3 = "trip-three";
+  const b3 = ops.setTripName(cb, "Oslo");
+  await leafSend(B.port, t3, [b3]);
+  await pollTrip(A.port, t3, [opId(b3)]);
+
+  // All three trips crossed ONE inbound peer connection on A — not one per trip.
+  assert.equal(countInboundPeers(A.hub), 1, "a single multiplexed peer link carries every trip");
 });
 
-test("a wrong peer token stops replication; a matching one allows it", async (t) => {
-  // Hubs agree on a token; B dials A with it → replication works.
-  const good = await twoHubs(t, { token: "s3cret" });
-  const trip = "trip-token-ok";
-  const A = new Clock("A");
-  const wsA = await open(`ws://127.0.0.1:${good.portA}`);
-  wsA.send(JSON.stringify({ t: "hello", trip, have: [] }));
-  await next(wsA, (m) => m.t === "sync");
-  const op1 = ops.setTripName(A, "Rome");
-  wsA.send(JSON.stringify({ t: "op", op: op1 }));
+test("a backlog created while the link is down flushes on reconnect", async (t) => {
+  const token = "s3cret";
+  const A = await mkHub(t, { peerToken: token });
+  const B = await mkHub(t, { peerUrls: [A.url], peerToken: token });
 
-  const wsB = await open(`ws://127.0.0.1:${good.portB}`);
-  const gotByB = collectOps(wsB, [opId(op1)]);
-  wsB.send(JSON.stringify({ t: "hello", trip, have: [] }));
-  assert.equal((await gotByB).get(opId(op1)).op, "set_trip_name", "matching token replicates");
-  wsA.close();
-  wsB.close();
+  // Wait for the always-on link to establish.
+  const upBy = Date.now() + 4000;
+  while (countInboundPeers(A.hub) === 0 && Date.now() < upBy) await delay(50);
+  assert.equal(countInboundPeers(A.hub), 1, "link came up on its own (active, not lazy)");
+
+  // Sever the link from A's side (a transient network drop). B's dialer will
+  // reconnect on its own.
+  for (const c of A.hub.wss.connections) if (c.isPeer) c.terminate();
+
+  // Create data on B *while the link is down*. It can't be sent now — it must
+  // sit in B's log and flush when the link returns. This is the core guarantee:
+  // no situation where a hub has data but can't ever deliver it.
+  const cb = new Clock("B");
+  const trip = "trip-offline-hub";
+  const b1 = ops.setTripName(cb, "Reykjavik");
+  await leafSend(B.port, trip, [b1]);
+
+  // Without any manual nudge, A eventually receives it once B reconnects and
+  // reconciles.
+  await pollTrip(A.port, trip, [opId(b1)], 8000);
+  assert.ok(countInboundPeers(A.hub) >= 1, "link re-established");
+});
+
+test("no token configured: peer links are accepted (open default)", async (t) => {
+  const A = await mkHub(t, {}); // no token
+  const B = await mkHub(t, { peerUrls: [A.url] }); // no token
+  const ca = new Clock("A");
+  const trip = "trip-open";
+  const a1 = ops.setTripName(ca, "Rome");
+  await leafSend(A.port, trip, [a1]);
+  await pollTrip(B.port, trip, [opId(a1)]);
 });
 
 test("a mismatched peer token blocks replication", async (t) => {
-  // Hub A requires token "right"; hub B dials with "wrong" → A closes the peer
-  // link 1008, so nothing crosses. The B leaf gets its own (empty) sync but
-  // never receives A's op.
-  const dirA = fs.mkdtempSync(path.join(os.tmpdir(), "siano-peerA-"));
-  const dirB = fs.mkdtempSync(path.join(os.tmpdir(), "siano-peerB-"));
-  const hubA = createHub({ dataDir: dirA, peerToken: "right" });
-  const portA = await listen(hubA.httpServer);
-  const hubB = createHub({ dataDir: dirB, peerUrls: [`ws://127.0.0.1:${portA}`], peerToken: "wrong" });
-  const portB = await listen(hubB.httpServer);
-  t.after(async () => {
-    await hubB.shutdown();
-    await hubA.shutdown();
-    fs.rmSync(dirA, { recursive: true, force: true });
-    fs.rmSync(dirB, { recursive: true, force: true });
-  });
+  const A = await mkHub(t, { peerToken: "right" });
+  const B = await mkHub(t, { peerUrls: [A.url], peerToken: "wrong" });
 
+  const ca = new Clock("A");
   const trip = "trip-token-bad";
-  const A = new Clock("A");
-  const wsA = await open(`ws://127.0.0.1:${portA}`);
-  wsA.send(JSON.stringify({ t: "hello", trip, have: [] }));
-  await next(wsA, (m) => m.t === "sync");
-  wsA.send(JSON.stringify({ t: "op", op: ops.setTripName(A, "Rome") }));
+  const a1 = ops.setTripName(ca, "Rome");
+  await leafSend(A.port, trip, [a1]);
 
-  const wsB = await open(`ws://127.0.0.1:${portB}`);
+  // Give the (rejected) link a couple of dial attempts, then assert nothing
+  // crossed and no inbound peer link is registered.
+  await delay(1500);
+  const wsB = await wsOpen(`ws://127.0.0.1:${B.port}`);
   wsB.send(JSON.stringify({ t: "hello", trip, have: [] }));
-  await next(wsB, (m) => m.t === "sync"); // B's own empty sync
-
-  // Give the (rejected) peer link time to fail; assert B never got A's op.
-  let leaked = false;
-  wsB.addEventListener("message", (ev) => {
-    const m = JSON.parse(ev.data);
-    if ((m.op || m.ops) && (m.op?.op === "set_trip_name" || (m.ops || []).some((o) => o.op === "set_trip_name"))) leaked = true;
-  });
-  await new Promise((r) => setTimeout(r, 600));
-  assert.equal(leaked, false, "no ops cross a mismatched-token peer link");
-
-  wsA.close();
+  const sync = await nextMsg(wsB, (m) => m.t === "sync");
   wsB.close();
+  assert.equal(sync.ops.length, 0, "no ops cross a mismatched-token link");
+  assert.equal(A.hub.metrics.peerAuthFailures > 0, true, "A recorded the auth failure");
 });
