@@ -30,7 +30,7 @@ import { showOnboarding } from "./ui/onboarding.js";
 import { debugEnabled, setDebugEnabled } from "./ui/debug.js";
 import { dlog, derror } from "./log.js";
 import { registerVersion } from "./version.js";
-registerVersion("js/app.js", 1);
+registerVersion("js/app.js", 2);
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const EMOJIS = ["🍽️", "🍕", "🍔", "🍜", "🍣", "🥘", "🍰", "🍺", "🍷", "☕", "🛒", "🚕", "🏨", "🎟️", "⛽", "🍦"];
@@ -234,6 +234,23 @@ async function main() {
     installApp: async () => {
       const outcome = await promptInstall();
       if (outcome === "accepted") toast("Installing Siano…");
+    },
+
+    // First-run hint: tapping the empty traveller dock opens Settings and blinks
+    // the "Add traveller" field, so a newcomer sees exactly where to start. The
+    // Settings content is always rendered (just hidden), so the field is in the
+    // DOM the moment we open the drawer; blink on the next frame, after the
+    // drawer has begun sliding in, and self-clear when the animation ends.
+    hintAddTraveller: () => {
+      View.openDrawer("menu");
+      requestAnimationFrame(() => {
+        const input = document.getElementById("add-traveller-input");
+        if (!input) return;
+        input.classList.remove("hint-blink");
+        void input.offsetWidth; // reflow so a repeat tap restarts the animation
+        input.classList.add("hint-blink");
+        input.addEventListener("animationend", () => input.classList.remove("hint-blink"), { once: true });
+      });
     },
 
     // "Your trips" switcher (device-local list).
