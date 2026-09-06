@@ -414,6 +414,32 @@ button {
   text-align: center;
   color: var(--slate-500);
 }
+/* The lead prompt shimmers: a slow amber highlight sweeps across the words so
+   the empty board gently draws the eye to the one thing to do next. The
+   gradient is painted into the text (background-clip: text) and slid sideways
+   forever. Theme-aware (amber/slate tokens swap under the light theme); colour
+   emoji in the text keep their own colour (they paint through the colour-glyph
+   path, not the transparent text fill). The .sub tip below stays muted. */
+.board-empty span:not(.sub) {
+  font-weight: var(--fw-semibold);
+  background-image: linear-gradient(
+    90deg,
+    var(--slate-500) 0%,
+    var(--amber-400) 50%,
+    var(--slate-500) 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: board-empty-shimmer 5s linear infinite;
+}
+@keyframes board-empty-shimmer {
+  to {
+    background-position: 200% center;
+  }
+}
 .board-empty .sub {
   margin-top: 0.5rem;
   font-size: 0.75rem;
