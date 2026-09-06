@@ -27,7 +27,7 @@ import { installState } from "./install.js";
 import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 4);
+registerVersion("js/ui/board.js", 5);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -551,7 +551,9 @@ function travellersSection(snap, actions) {
   });
 
   const addForm = el("form", { class: "add-row", onsubmit: (e) => { e.preventDefault(); const inp = e.target.elements.name; actions.addMember(inp.value); inp.value = ""; } },
-    el("input", { class: "text-input", name: "name", placeholder: "Add traveller…", ...NO_AUTOFILL, autocapitalize: "words" }),
+    // id lets the empty-dock hint (actions.hintAddTraveller) find this field to
+    // blink it as a first-run "start here" cue.
+    el("input", { id: "add-traveller-input", class: "text-input", name: "name", placeholder: "Add traveller…", ...NO_AUTOFILL, autocapitalize: "words" }),
     el("button", { class: "btn" }, "Add"),
   );
 
@@ -980,7 +982,13 @@ export function render(snap, actions) {
   dock.replaceChildren(
     ...(snap.members.length
       ? snap.members.map((m) => travellerToken(m))
-      : [el("p", { class: "dock-empty" }, "No travellers yet — add some in ⚙️ Settings.")]),
+      // Empty dock (a fresh trip with nobody added yet): make the whole
+      // placeholder a tap target that opens Settings and blinks the "Add
+      // traveller" field — a first-run hint that shows a newcomer where to start.
+      : [el("button", {
+          type: "button", class: "dock-empty",
+          onclick: () => actions.hintAddTraveller(),
+        }, "No travellers yet — tap here to add your first traveller in ⚙️ Settings.")]),
   );
 
   renderQuickActions(snap, actions);
