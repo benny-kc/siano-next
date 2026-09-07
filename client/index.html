@@ -415,7 +415,8 @@
           </div>
           <!-- Receive onto another phone. -->
           <p class="osync-note">Tap the button below on the other phone — the one that will receive the bills.</p>
-          <button type="button" class="btn-block osync-btn--go">Start receiving</button>
+          <!-- Also a progress bar: fills once left→right on press (no loop). -->
+          <button type="button" class="btn-block osync-btn--go" data-siano-offlinesync-receive>Start receiving</button>
           <p class="osync-note osync-note--muted">After tapping, allow camera access if your phone asks for it.</p>
         </div>
       </div>
