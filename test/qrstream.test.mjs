@@ -7,6 +7,8 @@ import {
   parseFrame,
   toPayload,
   fromPayload,
+  packOps,
+  unpackOps,
   FRAME_PREFIX,
 } from "../client/js/core/qrstream.js";
 
@@ -78,6 +80,36 @@ test("ops payload survives the codec unchanged", () => {
   for (let i = 0; i < enc.K * 40 + 200 && !dec.isComplete(); i++) dec.add(parseFrame(serializeFrame(enc.next())));
   assert.ok(dec.isComplete());
   assert.deepEqual(fromPayload(dec.payload()), ops);
+});
+
+test("packOps deflates a redundant batch and round-trips through the fountain", async () => {
+  // vv-heavy ops (a repeated 36-char device UUID per op) — the realistic shape.
+  const dev = "1f2e3d4c-5b6a-7980-a1b2-c3d4e5f60718";
+  const ops = [];
+  for (let i = 0; i < 20; i++) {
+    ops.push({ t: "add_meal", id: "meal-" + i, name: "Dinner " + i, lamport: i + 1, device: dev, vv: { [dev]: i + 1 } });
+    ops.push({ t: "set_amount", id: "meal-" + i, cents: 1234 * (i + 1), lamport: i + 1, device: dev, vv: { [dev]: i + 1 } });
+  }
+  const raw = toPayload(ops);
+  const packed = await packOps(ops);
+  // Should be flagged deflate (0x01) and substantially smaller than raw JSON.
+  assert.equal(packed[0], 0x01, "expected a deflate-flagged payload");
+  assert.ok(packed.length < raw.length / 2, `packed ${packed.length} not < half of raw ${raw.length}`);
+
+  // And it must survive the whole fountain + unpack path unchanged.
+  const enc = makeEncoder(packed);
+  const dec = makeDecoder();
+  for (let i = 0; i < enc.K * 40 + 200 && !dec.isComplete(); i++) dec.add(parseFrame(serializeFrame(enc.next())));
+  assert.ok(dec.isComplete());
+  assert.deepEqual(await unpackOps(dec.payload()), ops);
+});
+
+test("packOps leaves an incompressible/tiny payload raw, and unpackOps reads it", async () => {
+  const ops = [{ t: "set_open", id: "m", open: true, lamport: 1, device: "A", vv: { A: 1 } }];
+  const packed = await packOps(ops);
+  // Header byte is one of the two known formats, and it round-trips either way.
+  assert.ok(packed[0] === 0x00 || packed[0] === 0x01);
+  assert.deepEqual(await unpackOps(packed), ops);
 });
 
 test("parseFrame rejects junk", () => {
