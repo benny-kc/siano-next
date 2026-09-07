@@ -18,7 +18,7 @@ import { makeEncoder, makeDecoder, serializeFrame, parseFrame, packOps, unpackOp
 import { encodeText } from "../vendor/qrcode.js";
 import jsQR from "../vendor/jsqr.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/interactions.js", 10);
+registerVersion("js/ui/interactions.js", 11);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag
@@ -230,6 +230,8 @@ function wireOfflineSyncSim(actions) {
       if (res.sameTrip) {
         const n = res.added;
         boxNote(n ? `Received ${n} new ${n === 1 ? "op" : "ops"} 🎉` : "Already up to date — nothing new 🎉");
+        // Auto-close the overlay a few seconds after a successful receive.
+        setTimeout(() => { if (View.offlineSyncOpen()) View.closeOfflineSync(); }, 4000);
         return;
       }
       // A different trip: it's been created on this device — open it.
