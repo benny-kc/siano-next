@@ -2146,6 +2146,26 @@ table.report thead th.name {
   z-index: 3;
   background: var(--card-sticky);
 }
+/* Long-title fix: at rest the sticky Bill column is as wide as its title, so a
+   long name can hide every share column until you scroll far right. Once the
+   table IS scrolled sideways (the .scrolled class is toggled by the scroll
+   listener in board.js), fade the column's right edge to transparent with a
+   mask so the traveller columns sliding underneath show through. The opaque
+   left part is sized to roughly the first ten letters of the title — enough to
+   hint which bill a row is (--rep-name-vis = the cell's left padding + the
+   emoji + ~10 characters, in `ch` so it tracks the Appearance text size), not
+   a fraction of the column, so a very long title no longer keeps most of the
+   screen. Then a narrow gradient band fades out, leaving the rest see-through.
+   The mask makes the cell (background + text) transparent there, so it reveals
+   the scrolled cells behind it rather than clipping them off. */
+.report-scroll.scrolled table.report th.name,
+.report-scroll.scrolled table.report td.name {
+  --rep-name-vis: calc(0.75rem + 10ch);
+  -webkit-mask-image: linear-gradient(to right,
+    #000 0, #000 var(--rep-name-vis), transparent calc(var(--rep-name-vis) + 2rem));
+  mask-image: linear-gradient(to right,
+    #000 0, #000 var(--rep-name-vis), transparent calc(var(--rep-name-vis) + 2rem));
+}
 /* Header repeated inside the body every N rows so the column labels stay in
    sight when a long trip's table is scrolled. Styled like the real header, but
    NOT sticky — it scrolls with the rows as a periodic label reminder. */

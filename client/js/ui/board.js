@@ -27,7 +27,7 @@ import { installState } from "./install.js";
 import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 8);
+registerVersion("js/ui/board.js", 9);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -803,9 +803,18 @@ function renderReport(snap) {
   const table = el("table", { class: "report matrix" },
     el("thead", {}, makeHead()), el("tbody", {}, ...body), foot);
 
+  // The sticky Bill column stays full-width at rest (so a long title reads),
+  // but once the table is scrolled sideways a CSS mask fades its right edge to
+  // transparent so the traveller columns sliding underneath show through
+  // instead of hiding behind a wide title. Toggle a class the moment the
+  // horizontal scroll leaves the origin (see .report-scroll.scrolled in
+  // app.css); scroll events don't bubble, so this is wired per-render.
   const kids = [
     el("h3", {}, "Bills — each traveller's share"),
-    el("div", { class: "report-scroll" }, table),
+    el("div", {
+      class: "report-scroll",
+      onscroll: (e) => e.currentTarget.classList.toggle("scrolled", e.currentTarget.scrollLeft > 0),
+    }, table),
   ];
   if (rep.draftCount > 0) {
     kids.push(el("p", { class: "muted-note", style: "margin-top:0.5rem" },
