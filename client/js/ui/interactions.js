@@ -15,7 +15,7 @@ import { View } from "./viewstate.js";
 import { ui } from "./board.js";
 import { selectedMember, setSelectedTraveller, clearSelectedTraveller } from "./selection.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/interactions.js", 3);
+registerVersion("js/ui/interactions.js", 4);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag
@@ -85,32 +85,34 @@ function wireOverlayClicks(actions, schedulePaint) {
 }
 
 // ── Offline sync — simulated "sending" progress ───────────────────────────────
-//    Placeholder until the real QR stream drives the bar. Pressing "Start
-//    sending" arms a CSS animation that fills the bar 0→100% over 10s and loops
-//    (drops to 0 and repeats). Closing the overlay — by the ✕, the backdrop or
-//    the system Back button, all of which just drop data-siano-offlinesync on
-//    <html> — stops and resets it, so the bar only ever moves after a press.
-//    The modal markup is static in index.html (never repainted), so a direct
-//    listener is safe. No transfer logic yet.
+//    The send button IS the progress bar: pressing "Start sending" arms a CSS
+//    animation that sweeps a green fill across the amber button left→right
+//    (0→100% over 10s) and loops (drops back to the left and repeats), and the
+//    label switches to "Sending…". Closing the overlay — by the ✕, the backdrop
+//    or the system Back button, all of which just drop data-siano-offlinesync on
+//    <html> — stops it, resets the fill and restores the label, so it only ever
+//    runs after a press. The modal markup is static in index.html (never
+//    repainted), so a direct listener is safe. Placeholder — no transfer yet.
 function wireOfflineSyncSim() {
   const modal = document.getElementById("offline-sync-modal");
   if (!modal) return;
   const sendBtn = modal.querySelector("[data-siano-offlinesync-send]");
-  const bar = modal.querySelector(".osync-progress-bar");
-  const track = modal.querySelector(".osync-progress");
-  if (!sendBtn || !bar) return;
+  if (!sendBtn) return;
+  const idleLabel = sendBtn.textContent; // "Start sending"
 
   sendBtn.addEventListener("click", () => {
-    bar.classList.remove("is-sending");
-    void bar.offsetWidth; // force reflow so a re-press restarts the fill from 0
-    bar.classList.add("is-sending");
-    if (track) track.setAttribute("aria-valuetext", "Sending…");
+    sendBtn.classList.remove("is-sending");
+    void sendBtn.offsetWidth; // force reflow so a re-press restarts the fill from 0
+    sendBtn.classList.add("is-sending");
+    sendBtn.setAttribute("aria-busy", "true");
+    sendBtn.textContent = "Sending…";
   });
 
   new MutationObserver(() => {
     if (!document.documentElement.hasAttribute("data-siano-offlinesync")) {
-      bar.classList.remove("is-sending");
-      if (track) track.removeAttribute("aria-valuetext");
+      sendBtn.classList.remove("is-sending");
+      sendBtn.removeAttribute("aria-busy");
+      sendBtn.textContent = idleLabel;
     }
   }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-siano-offlinesync"] });
 }
