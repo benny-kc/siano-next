@@ -1229,11 +1229,21 @@ button {
   background: var(--slate-800);
 }
 .osync-progress-bar {
-  width: 0; /* 0% until the transfer logic drives it */
+  width: 0; /* 0% until a transfer (or the simulation below) drives it */
   height: 100%;
   border-radius: 999px;
   background: var(--amber-400);
   transition: width 0.2s;
+}
+/* Simulated "sending" fill: 0→100% over 10s, looping (drop to 0 and repeat)
+   while the send button has armed it. Placeholder until the real QR stream
+   reports actual progress; toggled by is-sending in interactions.js. */
+@keyframes osync-fill {
+  from { width: 0; }
+  to { width: 100%; }
+}
+.osync-progress-bar.is-sending {
+  animation: osync-fill 10s linear infinite;
 }
 .osync-note {
   margin: 0;

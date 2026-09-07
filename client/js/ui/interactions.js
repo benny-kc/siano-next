@@ -15,7 +15,7 @@ import { View } from "./viewstate.js";
 import { ui } from "./board.js";
 import { selectedMember, setSelectedTraveller, clearSelectedTraveller } from "./selection.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/interactions.js", 2);
+registerVersion("js/ui/interactions.js", 3);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag
@@ -30,6 +30,7 @@ export function initInteractions({ actions, schedulePaint }) {
   BoardView.reset();
 
   wireOverlayClicks(actions, schedulePaint);
+  wireOfflineSyncSim();
   wireConfirm(actions);
   wireEdgeSwipe(actions, schedulePaint);
   wirePanZoom(surface);
@@ -81,6 +82,37 @@ function wireOverlayClicks(actions, schedulePaint) {
     else if (t.hasAttribute("data-siano-sortmenu")) View.toggleSortMenu();
     else if (t.hasAttribute("data-siano-sortmenu-close")) View.closeSortMenu();
   });
+}
+
+// ── Offline sync — simulated "sending" progress ───────────────────────────────
+//    Placeholder until the real QR stream drives the bar. Pressing "Start
+//    sending" arms a CSS animation that fills the bar 0→100% over 10s and loops
+//    (drops to 0 and repeats). Closing the overlay — by the ✕, the backdrop or
+//    the system Back button, all of which just drop data-siano-offlinesync on
+//    <html> — stops and resets it, so the bar only ever moves after a press.
+//    The modal markup is static in index.html (never repainted), so a direct
+//    listener is safe. No transfer logic yet.
+function wireOfflineSyncSim() {
+  const modal = document.getElementById("offline-sync-modal");
+  if (!modal) return;
+  const sendBtn = modal.querySelector("[data-siano-offlinesync-send]");
+  const bar = modal.querySelector(".osync-progress-bar");
+  const track = modal.querySelector(".osync-progress");
+  if (!sendBtn || !bar) return;
+
+  sendBtn.addEventListener("click", () => {
+    bar.classList.remove("is-sending");
+    void bar.offsetWidth; // force reflow so a re-press restarts the fill from 0
+    bar.classList.add("is-sending");
+    if (track) track.setAttribute("aria-valuetext", "Sending…");
+  });
+
+  new MutationObserver(() => {
+    if (!document.documentElement.hasAttribute("data-siano-offlinesync")) {
+      bar.classList.remove("is-sending");
+      if (track) track.removeAttribute("aria-valuetext");
+    }
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-siano-offlinesync"] });
 }
 
 // ── In-page confirm dialog (replaces native confirm()). Intercepts clicks on
