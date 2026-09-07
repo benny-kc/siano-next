@@ -139,7 +139,7 @@
         transform: translateX(-100%);
       }
       .drawer--menu { transform: translateX(100%); }
-      #help-modal, #confirm-modal, #onboard-modal { position: fixed; inset: 0; z-index: 65; opacity: 0; pointer-events: none; }
+      #help-modal, #confirm-modal, #onboard-modal, #offline-sync-modal { position: fixed; inset: 0; z-index: 65; opacity: 0; pointer-events: none; }
       #bills-sort-menu { display: none; }
       .hidden { display: none !important; }
     </style>
@@ -382,6 +382,44 @@
             Everything here is also learnable by tapping around — nothing destructive happens without a
             confirmation. Come back any time via ⚙️ Settings → ❓.
           </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─────────── Offline sync (QR stream) ───────────
+         Opened from Settings → Offline sync. Split in half: the upper half
+         SENDS this device's bills (QR stream placeholder + progress + start),
+         the lower half RECEIVES onto another phone (start = open its camera).
+         No QR/transfer logic yet — the buttons are inert placeholders; the
+         open/close state lives on <html> (data-siano-offlinesync, viewstate.js)
+         so a board repaint never disturbs it, and the CSP forbids inline
+         scripts, so the markup is static here and wired by delegation. -->
+    <div id="offline-sync-modal">
+      <div class="osync-backdrop" data-siano-offlinesync-close></div>
+      <div class="osync-panel">
+        <div class="osync-head">
+          <h2>📡 Offline sync</h2>
+          <button class="round-btn" data-siano-offlinesync-close aria-label="Close offline sync">✕</button>
+        </div>
+        <div class="osync-body">
+          <!-- Upper half — send this phone's bills -->
+          <section class="osync-half osync-send">
+            <h3>Send bills</h3>
+            <div class="osync-qr" aria-hidden="true">
+              <span class="osync-qr-note">QR code will appear here</span>
+            </div>
+            <div class="osync-progress" role="progressbar" aria-label="Sending progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+              <div class="osync-progress-bar"></div>
+            </div>
+            <button type="button" class="btn-block osync-btn">Start sending</button>
+          </section>
+          <!-- Lower half — receive onto another phone -->
+          <section class="osync-half osync-receive">
+            <h3>Receive bills</h3>
+            <p class="osync-note">Tap this on the other phone — the one that will receive the bills.</p>
+            <button type="button" class="btn-block osync-btn">Start receiving</button>
+            <p class="osync-note osync-note--muted">After tapping, allow camera access if your phone asks for it.</p>
+          </section>
         </div>
       </div>
     </div>
