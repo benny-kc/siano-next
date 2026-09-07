@@ -18,7 +18,7 @@ import { makeEncoder, makeDecoder, serializeFrame, parseFrame, packOps, unpackOp
 import { encodeText } from "../vendor/qrcode.js";
 import jsQR from "../vendor/jsqr.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/interactions.js", 9);
+registerVersion("js/ui/interactions.js", 10);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag
@@ -150,8 +150,10 @@ function wireOfflineSyncSim(actions) {
   const startStream = async () => {
     stopReceive();
     stopStream();
-    const ops = (actions && actions.allOps && actions.allOps()) || [];
-    const payload = await packOps(ops); // whole-payload deflate (fewer frames)
+    // Envelope carries the trip identity + ops (so the receiver merges into the
+    // right trip, not whatever it has open).
+    const env = (actions && actions.exportTrip && actions.exportTrip()) || { ops: [] };
+    const payload = await packOps(env); // whole-payload deflate (fewer frames)
     // Overlay may have closed while packOps awaited.
     if (!document.documentElement.hasAttribute("data-siano-offlinesync") || !sendBtn.classList.contains("is-sending")) return;
     const enc = makeEncoder(payload);
@@ -216,17 +218,25 @@ function wireOfflineSyncSim(actions) {
 
     const complete = async (packed) => {
       stopReceive(); // release camera + loop before the async inflate/ingest
-      let ops = null;
-      try { ops = await unpackOps(packed); } catch { ops = null; }
-      if (!ops) {
+      let env = null;
+      try { env = await unpackOps(packed); } catch { env = null; }
+      const res = env && actions && actions.receiveTrip ? await actions.receiveTrip(env) : null;
+      if (!res || res.error) {
         if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel; }
         boxNote("Couldn't read the transfer — try again.");
         return;
       }
-      const added = (actions && actions.ingestOps && actions.ingestOps(ops)) || [];
       if (recvBtn) { recvBtn.style.backgroundSize = "100% 100%"; recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = "Received ✓"; }
-      const n = added.length;
-      boxNote(n ? `Received ${n} new ${n === 1 ? "op" : "ops"} 🎉` : "Already up to date — nothing new 🎉");
+      if (res.sameTrip) {
+        const n = res.added;
+        boxNote(n ? `Received ${n} new ${n === 1 ? "op" : "ops"} 🎉` : "Already up to date — nothing new 🎉");
+        return;
+      }
+      // A different trip: it's been created on this device — open it.
+      const bills = res.billCount;
+      const label = res.name ? `“${res.name}”` : "a new trip";
+      boxNote(`Received ${label} — ${bills} ${bills === 1 ? "bill" : "bills"}. Opening…`);
+      setTimeout(() => { window.location.assign(res.url); }, 1400);
     };
 
     const scan = () => {
