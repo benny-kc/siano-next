@@ -1218,20 +1218,11 @@ button {
   background-repeat: no-repeat;
   background-position: left center;
   background-size: 0% 100%;
-  /* Smooth the discrete per-frame steps of the JS-driven send fill. */
+  /* Smooth the discrete per-frame steps of the JS-driven fills. */
   transition: background-size 0.12s linear;
 }
-/* Sending: the fill width is driven live by the QR-stream player (inline
-   background-size in interactions.js), so it reflects real stream coverage —
-   no CSS animation here. Receiving: a one-shot fill that holds at 100%
-   (placeholder until the camera/decode step lands). */
-#offline-sync-modal .osync-btn--go.is-receiving {
-  animation: osync-btn-fill 10s linear forwards;
-}
-@keyframes osync-btn-fill {
-  from { background-size: 0% 100%; }
-  to { background-size: 100% 100%; }
-}
+/* Both fills are driven live by JS (inline background-size in interactions.js):
+   sending = fountain stream coverage; receiving = real QR decode progress. */
 /* Placeholder square where the streamed QR frames will render later. Full width
    (like the buttons) but kept square — a bigger code carries more per frame, so
    transfers go faster. */
@@ -1241,6 +1232,7 @@ button {
   justify-content: center;
   width: 100%;
   aspect-ratio: 1 / 1;
+  overflow: hidden; /* clip the live camera <video> to the rounded box */
   border-radius: 0.75rem;
   border: 2px dashed var(--slate-700);
   background: var(--slate-800);
