@@ -27,7 +27,7 @@ import { installState } from "./install.js";
 import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 6);
+registerVersion("js/ui/board.js", 7);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -376,6 +376,7 @@ function renderMenu(snap, actions) {
       totalSection(snap),
       settleSection(snap),
       ledgerSection(snap, actions),
+      offlineSyncSection(actions),
       tripNameSection(snap, actions),
       tripsSection(snap, actions),
       appearanceSection(actions),
@@ -637,6 +638,18 @@ function ledgerSection(snap, actions) {
   }
 
   return el("section", {}, el("h3", {}, "Your ledger"), picks, block);
+}
+
+// Offline sync — the QR-stream / offline sync entry point. For now just the
+// button; the functionality (QR stream to sync two devices with no hub) lands
+// in a follow-up.
+function offlineSyncSection(actions) {
+  return el("section", {},
+    el("h3", {}, "Offline sync"),
+    el("div", { class: "admin" },
+      el("button", { type: "button", class: "btn-block" }, "📡 Offline sync"),
+    ),
+  );
 }
 
 function tripNameSection(snap, actions) {
