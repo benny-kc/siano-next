@@ -402,24 +402,20 @@
           <button class="round-btn" data-siano-offlinesync-close aria-label="Close offline sync">✕</button>
         </div>
         <div class="osync-body">
-          <!-- Upper half — send this phone's bills -->
-          <section class="osync-half osync-send">
-            <h3>Send bills</h3>
-            <div class="osync-qr" aria-hidden="true">
-              <span class="osync-qr-note">QR code will appear here</span>
-            </div>
-            <div class="osync-progress" role="progressbar" aria-label="Sending progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
-              <div class="osync-progress-bar"></div>
-            </div>
-            <button type="button" class="btn-block osync-btn">Start sending</button>
-          </section>
-          <!-- Lower half — receive onto another phone -->
-          <section class="osync-half osync-receive">
-            <h3>Receive bills</h3>
-            <p class="osync-note">Tap this on the other phone — the one that will receive the bills.</p>
-            <button type="button" class="btn-block osync-btn">Start receiving</button>
-            <p class="osync-note osync-note--muted">After tapping, allow camera access if your phone asks for it.</p>
-          </section>
+          <!-- Send: the (highlighted) start button, then progress, then the
+               QR/camera surface. That surface is shared — it shows the sender's
+               streamed QR here, and doubles as the receiver's camera preview. -->
+          <button type="button" class="btn-block osync-btn--go">Start sending</button>
+          <div class="osync-progress" role="progressbar" aria-label="Sending progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+            <div class="osync-progress-bar"></div>
+          </div>
+          <div class="osync-qr" aria-hidden="true">
+            <span class="osync-qr-note">QR code / camera will appear here</span>
+          </div>
+          <!-- Receive onto another phone. -->
+          <p class="osync-note">Tap the button below on the other phone — the one that will receive the bills.</p>
+          <button type="button" class="btn-block osync-btn--go">Start receiving</button>
+          <p class="osync-note osync-note--muted">After tapping, allow camera access if your phone asks for it.</p>
         </div>
       </div>
     </div>
