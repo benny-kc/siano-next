@@ -1202,8 +1202,26 @@ button {
   color: var(--on-accent);
   font-weight: var(--fw-bold);
 }
+/* background-COLOR only (not the `background` shorthand) so hovering while
+   sending doesn't wipe the green fill image below. */
 #offline-sync-modal .osync-btn--go:hover {
-  background: var(--amber-500);
+  background-color: var(--amber-500);
+}
+/* The send button doubles as the progress bar: a solid-green image grows from
+   the left (0→100% width) over 10s and loops, sweeping across the amber base
+   yellow→green as "progress" advances. Placeholder until the real QR stream
+   drives it; armed by is-sending in interactions.js. */
+#offline-sync-modal .osync-btn--go.is-sending {
+  background-color: var(--amber-400);
+  background-image: linear-gradient(var(--emerald-400), var(--emerald-400));
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: 0% 100%;
+  animation: osync-btn-fill 10s linear infinite;
+}
+@keyframes osync-btn-fill {
+  from { background-size: 0% 100%; }
+  to { background-size: 100% 100%; }
 }
 /* Placeholder square where the streamed QR frames will render later. */
 .osync-qr {
@@ -1220,30 +1238,6 @@ button {
   padding: 0 0.5rem;
   font-size: 0.75rem;
   color: var(--slate-500);
-}
-.osync-progress {
-  width: 100%;
-  height: 0.5rem;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--slate-800);
-}
-.osync-progress-bar {
-  width: 0; /* 0% until a transfer (or the simulation below) drives it */
-  height: 100%;
-  border-radius: 999px;
-  background: var(--amber-400);
-  transition: width 0.2s;
-}
-/* Simulated "sending" fill: 0→100% over 10s, looping (drop to 0 and repeat)
-   while the send button has armed it. Placeholder until the real QR stream
-   reports actual progress; toggled by is-sending in interactions.js. */
-@keyframes osync-fill {
-  from { width: 0; }
-  to { width: 100%; }
-}
-.osync-progress-bar.is-sending {
-  animation: osync-fill 10s linear infinite;
 }
 .osync-note {
   margin: 0;
