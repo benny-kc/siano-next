@@ -27,7 +27,7 @@ import { installState } from "./install.js";
 import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 5);
+registerVersion("js/ui/board.js", 6);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -976,7 +976,12 @@ export function render(snap, actions) {
 
   const canvas = document.getElementById("board-canvas");
   canvas.replaceChildren(...snap.meals.map((m) => mealCard(m, snap, actions)));
-  document.getElementById("board-empty").classList.toggle("hidden", snap.meals.length > 0);
+  const boardEmpty = document.getElementById("board-empty");
+  boardEmpty.classList.toggle("hidden", snap.meals.length > 0);
+  // The "Drag a traveller up here" phrase only shimmers once the trip has at
+  // least one traveller to drag — before that the prompt stays calm and the
+  // bottom dock hint shimmers instead (see .board-empty.has-travellers .shine).
+  boardEmpty.classList.toggle("has-travellers", snap.members.length > 0);
 
   const dock = document.getElementById("dock");
   dock.replaceChildren(
