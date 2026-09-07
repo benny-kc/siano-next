@@ -14,11 +14,11 @@ import { BoardView } from "./boardview.js";
 import { View } from "./viewstate.js";
 import { ui } from "./board.js";
 import { selectedMember, setSelectedTraveller, clearSelectedTraveller } from "./selection.js";
-import { makeEncoder, makeDecoder, serializeFrame, parseFrame, toPayload, fromPayload } from "../core/qrstream.js";
+import { makeEncoder, makeDecoder, serializeFrame, parseFrame, packOps, unpackOps } from "../core/qrstream.js";
 import { encodeText } from "../vendor/qrcode.js";
 import jsQR from "../vendor/jsqr.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/interactions.js", 8);
+registerVersion("js/ui/interactions.js", 9);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag
@@ -147,11 +147,14 @@ function wireOfflineSyncSim(actions) {
     if (sendTimer) { clearInterval(sendTimer); sendTimer = null; }
     if (sendBtn) sendBtn.style.backgroundSize = "";
   };
-  const startStream = () => {
+  const startStream = async () => {
     stopReceive();
     stopStream();
     const ops = (actions && actions.allOps && actions.allOps()) || [];
-    const enc = makeEncoder(toPayload(ops));
+    const payload = await packOps(ops); // whole-payload deflate (fewer frames)
+    // Overlay may have closed while packOps awaited.
+    if (!document.documentElement.hasAttribute("data-siano-offlinesync") || !sendBtn.classList.contains("is-sending")) return;
+    const enc = makeEncoder(payload);
     const gen = enc.K; // frames covering one payload's worth → one progress cycle
     let n = 0;
     const tick = () => {
@@ -211,9 +214,16 @@ function wireOfflineSyncSim(actions) {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
-    const finish = (ops) => {
+    const complete = async (packed) => {
+      stopReceive(); // release camera + loop before the async inflate/ingest
+      let ops = null;
+      try { ops = await unpackOps(packed); } catch { ops = null; }
+      if (!ops) {
+        if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel; }
+        boxNote("Couldn't read the transfer — try again.");
+        return;
+      }
       const added = (actions && actions.ingestOps && actions.ingestOps(ops)) || [];
-      stopReceive();
       if (recvBtn) { recvBtn.style.backgroundSize = "100% 100%"; recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = "Received ✓"; }
       const n = added.length;
       boxNote(n ? `Received ${n} new ${n === 1 ? "op" : "ops"} 🎉` : "Already up to date — nothing new 🎉");
@@ -238,11 +248,7 @@ function wireOfflineSyncSim(actions) {
           if (frame) {
             dec.add(frame);
             if (recvBtn) recvBtn.style.backgroundSize = dec.progress * 100 + "% 100%";
-            if (dec.isComplete()) {
-              let ops = null;
-              try { ops = fromPayload(dec.payload()); } catch { ops = null; }
-              if (ops) { finish(ops); return; }
-            }
+            if (dec.isComplete()) { complete(dec.payload()); return; }
           }
         }
       }

@@ -10,8 +10,11 @@
 // distribution, so the decoder reproduces each frame's block selection from the
 // tiny per-frame seed — nothing but the seed needs to travel).
 //
-//   payload (bytes) ──makeEncoder──▶ frames ──serializeFrame──▶ QR text
-//   QR text ──parseFrame──▶ frames ──makeDecoder().add──▶ payload (bytes)
+//   ops ──packOps──▶ payload ──makeEncoder──▶ frames ──serializeFrame──▶ QR text
+//   QR text ──parseFrame──▶ frames ──makeDecoder().add──▶ payload ──unpackOps──▶ ops
+//
+// packOps deflates the whole batch at once (see "compression" below); the
+// fountain codec itself is byte-oriented and neither knows nor cares.
 //
 // Frame wire format (all-ASCII so it packs tight in QR byte mode):
 //   SNQR1,<id>,<K>,<L>,<bs>,<seed>,<base64(coded block)>
@@ -25,11 +28,63 @@ export const FRAME_PREFIX = "SNQR1";
 export const DEFAULT_BLOCK_SIZE = 128;
 
 // ── payload <-> ops ───────────────────────────────────────────────────────────
+// Low-level (uncompressed) JSON <-> bytes. The fountain codec carries whatever
+// bytes packOps produces; these are the raw form (and what the codec tests use).
 export function toPayload(ops) {
   return new TextEncoder().encode(JSON.stringify(ops));
 }
 export function fromPayload(bytes) {
   return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+// ── compression (whole-payload deflate) ───────────────────────────────────────
+// The ops JSON repeats a 36-char device UUID in every op's version vector plus
+// the field names, so deflating the WHOLE batch at once (not per-op) crushes it
+// ~5–10× (docs/qr-sync.md §2) → far fewer QR frames → faster transfer. We use
+// the standard CompressionStream API (browsers incl. iOS Safari 16.4+, and
+// Node), so no new dependency. A 1-byte header makes the payload self-describing
+// and lets us fall back to raw when the API is missing or compression doesn't
+// help (tiny payloads): 0x00 = raw JSON bytes, 0x01 = deflate-raw of them.
+const FMT_RAW = 0x00;
+const FMT_DEFLATE = 0x01;
+const hasCompression = typeof CompressionStream !== "undefined";
+const hasDecompression = typeof DecompressionStream !== "undefined";
+
+function withPrefix(byte, bytes) {
+  const out = new Uint8Array(bytes.length + 1);
+  out[0] = byte;
+  out.set(bytes, 1);
+  return out;
+}
+async function deflateRaw(bytes) {
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function inflateRaw(bytes) {
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// ops -> compressed, self-describing payload bytes (what the sender fountains).
+export async function packOps(ops) {
+  const raw = toPayload(ops);
+  if (hasCompression) {
+    try {
+      const comp = await deflateRaw(raw);
+      if (comp.length < raw.length) return withPrefix(FMT_DEFLATE, comp);
+    } catch { /* fall through to raw */ }
+  }
+  return withPrefix(FMT_RAW, raw);
+}
+// Reassembled payload bytes -> ops (the receiver, after the fountain completes).
+export async function unpackOps(payload) {
+  const fmt = payload[0];
+  const body = payload.subarray(1);
+  if (fmt === FMT_DEFLATE) {
+    if (!hasDecompression) throw new Error("qrstream: compressed payload but no DecompressionStream");
+    return fromPayload(await inflateRaw(body));
+  }
+  return fromPayload(body);
 }
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
