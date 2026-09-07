@@ -1577,8 +1577,6 @@ button {
   height: 150px;
 }
 .admin {
-  border-top: 1px solid var(--slate-800);
-  padding-top: 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
