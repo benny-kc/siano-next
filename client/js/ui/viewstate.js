@@ -8,13 +8,14 @@
 // exactly as they left it, and the matching CSS in app.css slides/fades it with
 // no round trip.
 //
-//   data-siano-drawer   = "bills" | "menu" (absent = both closed)
-//   data-siano-help     = present when the help overlay is open
-//   data-siano-report   = present when the report overlay is open
-//   data-siano-sortmenu = present when the Bills sort popover is open
+//   data-siano-drawer      = "bills" | "menu" (absent = both closed)
+//   data-siano-help        = present when the help overlay is open
+//   data-siano-report      = present when the report overlay is open
+//   data-siano-sortmenu    = present when the Bills sort popover is open
+//   data-siano-offlinesync = present when the Offline sync overlay is open
 
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/viewstate.js", 1);
+registerVersion("js/ui/viewstate.js", 2);
 
 const root = document.documentElement;
 
@@ -26,7 +27,7 @@ const History = {
   programmatic: false, // we called history.back() ourselves (UI close)
   closeFromPop: false, // Back popped our entry (system close)
   anyOpen() {
-    return !!View.currentDrawer() || View.helpOpen() || View.reportOpen();
+    return !!View.currentDrawer() || View.helpOpen() || View.reportOpen() || View.offlineSyncOpen();
   },
   sync() {
     const open = this.anyOpen();
@@ -93,6 +94,22 @@ export const View = {
     History.sync();
   },
 
+  // ── Offline sync overlay ────────────────────────────────────────────────────
+  // The QR-stream device-to-device sync modal (opened from Settings). Sits on
+  // top of the Settings drawer, exactly like the help overlay; closing it
+  // returns to the drawer beneath.
+  offlineSyncOpen() {
+    return root.hasAttribute("data-siano-offlinesync");
+  },
+  openOfflineSync() {
+    root.setAttribute("data-siano-offlinesync", "");
+    History.sync();
+  },
+  closeOfflineSync() {
+    root.removeAttribute("data-siano-offlinesync");
+    History.sync();
+  },
+
   // ── Bills sort popover ────────────────────────────────────────────────────────
   sortMenuOpen() {
     return root.hasAttribute("data-siano-sortmenu");
@@ -117,6 +134,7 @@ export const View = {
     root.removeAttribute("data-siano-drawer");
     root.removeAttribute("data-siano-help");
     root.removeAttribute("data-siano-report");
+    root.removeAttribute("data-siano-offlinesync");
     root.removeAttribute("data-siano-sortmenu");
     this.reflectSortMenu();
     History.sync();

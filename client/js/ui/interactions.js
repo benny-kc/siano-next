@@ -15,7 +15,7 @@ import { View } from "./viewstate.js";
 import { ui } from "./board.js";
 import { selectedMember, setSelectedTraveller, clearSelectedTraveller } from "./selection.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/interactions.js", 1);
+registerVersion("js/ui/interactions.js", 2);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag
@@ -64,6 +64,7 @@ function wireOverlayClicks(actions, schedulePaint) {
     const t = e.target.closest(
       "[data-siano-open],[data-siano-close],[data-siano-help-open]," +
         "[data-siano-help-close],[data-siano-report-open],[data-siano-report-close]," +
+        "[data-siano-offlinesync-open],[data-siano-offlinesync-close]," +
         "[data-siano-sortmenu],[data-siano-sortmenu-close]",
     );
     if (!t) return;
@@ -75,6 +76,8 @@ function wireOverlayClicks(actions, schedulePaint) {
     else if (t.hasAttribute("data-siano-help-close")) View.closeHelp();
     else if (t.hasAttribute("data-siano-report-open")) View.openReport();
     else if (t.hasAttribute("data-siano-report-close")) View.closeReport();
+    else if (t.hasAttribute("data-siano-offlinesync-open")) View.openOfflineSync();
+    else if (t.hasAttribute("data-siano-offlinesync-close")) View.closeOfflineSync();
     else if (t.hasAttribute("data-siano-sortmenu")) View.toggleSortMenu();
     else if (t.hasAttribute("data-siano-sortmenu-close")) View.closeSortMenu();
   });
