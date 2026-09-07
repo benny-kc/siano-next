@@ -14,8 +14,10 @@ import { BoardView } from "./boardview.js";
 import { View } from "./viewstate.js";
 import { ui } from "./board.js";
 import { selectedMember, setSelectedTraveller, clearSelectedTraveller } from "./selection.js";
+import { makeEncoder, serializeFrame, toPayload } from "../core/qrstream.js";
+import { encodeText } from "../vendor/qrcode.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/interactions.js", 6);
+registerVersion("js/ui/interactions.js", 7);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag
@@ -30,7 +32,7 @@ export function initInteractions({ actions, schedulePaint }) {
   BoardView.reset();
 
   wireOverlayClicks(actions, schedulePaint);
-  wireOfflineSyncSim();
+  wireOfflineSyncSim(actions);
   wireConfirm(actions);
   wireEdgeSwipe(actions, schedulePaint);
   wirePanZoom(surface);
@@ -84,52 +86,96 @@ function wireOverlayClicks(actions, schedulePaint) {
   });
 }
 
-// ── Offline sync — simulated progress ─────────────────────────────────────────
-//    Each action button IS its own progress bar: a green fill sweeps across the
-//    amber button left→right as a CSS animation.
-//    • "Start sending"  → label "Sending…", fills 0→100% over 10s and LOOPS
-//      (drops back to the left and repeats), plus the "sending on a loop" hint.
-//    • "Start receiving" → label "Receiving…", fills 0→100% over 10s ONCE and
-//      stays full (no loop).
-//    Both only run after a press. Closing the overlay — by the ✕, the backdrop
-//    or the system Back button, all of which just drop data-siano-offlinesync on
-//    <html> — stops them, resets the fills and restores the labels. The modal
-//    markup is static in index.html (never repainted), so direct listeners are
-//    safe. Placeholder — no transfer logic yet.
-function wireOfflineSyncSim() {
+// Render one QR-stream frame's text as an SVG that fills the square placeholder.
+function qrFrameSvg(text) {
+  try {
+    const { size, modules } = encodeText(text, "M");
+    const quiet = 4;
+    const dim = size + quiet * 2;
+    let path = "";
+    for (let r = 0; r < size; r++)
+      for (let c = 0; c < size; c++)
+        if (modules[r][c]) path += `M${c + quiet},${r + quiet}h1v1h-1z`;
+    return `<svg viewBox="0 0 ${dim} ${dim}" width="100%" height="100%" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">` +
+      `<rect width="${dim}" height="${dim}" fill="#ffffff"/><path d="${path}" fill="#0f172a"/></svg>`;
+  } catch { return ""; }
+}
+
+// ── Offline sync — the QR fountain stream (sender) ─────────────────────────────
+//    "Start sending" fountain-encodes the whole trip's ops (core/qrstream.js)
+//    into an ENDLESS stream of coded QR frames and plays them in the placeholder
+//    at ~8/sec (docs/qr-sync.md §4a). The send button IS the progress bar, and
+//    the green fill now means real stream coverage: it advances one step per
+//    frame across one payload-generation (enc.K frames — the whole payload sent
+//    once), then loops as the rateless stream keeps going. The label shows
+//    "Sending…" and the "sending on a loop" hint appears.
+//
+//    "Start receiving" still shows a one-shot placeholder fill/label (the camera
+//    decode + ingest lands in the next step).
+//
+//    Closing the overlay — the ✕, the backdrop or system Back, all of which drop
+//    data-siano-offlinesync on <html> — stops the stream, restores the QR
+//    placeholder, and resets both buttons. The modal markup is static in
+//    index.html (never repainted), so direct listeners are safe.
+function wireOfflineSyncSim(actions) {
   const modal = document.getElementById("offline-sync-modal");
   if (!modal) return;
   const sendBtn = modal.querySelector("[data-siano-offlinesync-send]");
   const recvBtn = modal.querySelector("[data-siano-offlinesync-receive]");
   if (!sendBtn && !recvBtn) return;
   const sendingNote = modal.querySelector(".osync-sending-note");
+  const qrBox = modal.querySelector(".osync-qr");
+  const qrIdle = qrBox ? qrBox.innerHTML : null; // "QR code / camera will appear here"
   const sendLabel = sendBtn && sendBtn.textContent; // "Start sending"
   const recvLabel = recvBtn && recvBtn.textContent; // "Start receiving"
 
-  // (Re)start a button's CSS fill from 0, even if it is already running.
-  const arm = (btn, cls, busyLabel) => {
-    btn.classList.remove(cls);
-    void btn.offsetWidth; // force reflow so a re-press restarts the fill from 0
-    btn.classList.add(cls);
-    btn.setAttribute("aria-busy", "true");
-    btn.textContent = busyLabel;
+  const FRAME_MS = 120; // ~8 QR frames/sec (docs/qr-sync.md: ~5–10/sec)
+  let timer = null;
+
+  const stopStream = () => {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (qrBox && qrIdle != null) qrBox.innerHTML = qrIdle;
+    if (sendBtn) sendBtn.style.backgroundSize = ""; // hand the fill back to CSS
   };
-  const disarm = (btn, cls, idleLabel) => {
-    btn.classList.remove(cls);
-    btn.removeAttribute("aria-busy");
-    btn.textContent = idleLabel;
+
+  const startStream = () => {
+    stopStream();
+    const ops = (actions && actions.allOps && actions.allOps()) || [];
+    const enc = makeEncoder(toPayload(ops));
+    const gen = enc.K; // frames covering one payload's worth → one progress cycle
+    let n = 0;
+    const tick = () => {
+      let text;
+      try { text = serializeFrame(enc.next()); } catch { return; }
+      if (qrBox) { const svg = qrFrameSvg(text); if (svg) qrBox.innerHTML = svg; }
+      // Real coverage: fill over one generation of frames, then loop.
+      if (sendBtn) sendBtn.style.backgroundSize = (((n % gen) + 1) / gen) * 100 + "% 100%";
+      n++;
+    };
+    tick();
+    timer = setInterval(tick, FRAME_MS);
   };
 
   if (sendBtn) sendBtn.addEventListener("click", () => {
-    arm(sendBtn, "is-sending", "Sending…");
+    sendBtn.classList.add("is-sending");
+    sendBtn.setAttribute("aria-busy", "true");
+    sendBtn.textContent = "Sending…";
     if (sendingNote) sendingNote.classList.remove("hidden");
+    startStream();
   });
-  if (recvBtn) recvBtn.addEventListener("click", () => arm(recvBtn, "is-receiving", "Receiving…"));
+  if (recvBtn) recvBtn.addEventListener("click", () => {
+    recvBtn.classList.remove("is-receiving");
+    void recvBtn.offsetWidth; // force reflow so a re-press restarts the fill from 0
+    recvBtn.classList.add("is-receiving");
+    recvBtn.setAttribute("aria-busy", "true");
+    recvBtn.textContent = "Receiving…";
+  });
 
   new MutationObserver(() => {
     if (document.documentElement.hasAttribute("data-siano-offlinesync")) return;
-    if (sendBtn) disarm(sendBtn, "is-sending", sendLabel);
-    if (recvBtn) disarm(recvBtn, "is-receiving", recvLabel);
+    stopStream();
+    if (sendBtn) { sendBtn.classList.remove("is-sending"); sendBtn.removeAttribute("aria-busy"); sendBtn.textContent = sendLabel; }
+    if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel; }
     if (sendingNote) sendingNote.classList.add("hidden");
   }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-siano-offlinesync"] });
 }

@@ -1218,11 +1218,13 @@ button {
   background-repeat: no-repeat;
   background-position: left center;
   background-size: 0% 100%;
+  /* Smooth the discrete per-frame steps of the JS-driven send fill. */
+  transition: background-size 0.12s linear;
 }
-/* Sending loops forever; receiving fills once and holds at 100% (forwards). */
-#offline-sync-modal .osync-btn--go.is-sending {
-  animation: osync-btn-fill 10s linear infinite;
-}
+/* Sending: the fill width is driven live by the QR-stream player (inline
+   background-size in interactions.js), so it reflects real stream coverage —
+   no CSS animation here. Receiving: a one-shot fill that holds at 100%
+   (placeholder until the camera/decode step lands). */
 #offline-sync-modal .osync-btn--go.is-receiving {
   animation: osync-btn-fill 10s linear forwards;
 }

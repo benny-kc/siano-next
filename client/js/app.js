@@ -130,6 +130,9 @@ async function main() {
   }
 
   const actions = {
+    // The whole trip's ops — read by the offline-sync QR stream (sender).
+    allOps: () => log.allOps(),
+
     setTripName: (name) => log.emit((c) => ops.setTripName(c, name)),
 
     addMember: (name) => {
