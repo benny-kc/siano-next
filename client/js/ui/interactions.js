@@ -15,7 +15,7 @@ import { View } from "./viewstate.js";
 import { ui } from "./board.js";
 import { selectedMember, setSelectedTraveller, clearSelectedTraveller } from "./selection.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/interactions.js", 5);
+registerVersion("js/ui/interactions.js", 6);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag
@@ -84,39 +84,53 @@ function wireOverlayClicks(actions, schedulePaint) {
   });
 }
 
-// ── Offline sync — simulated "sending" progress ───────────────────────────────
-//    The send button IS the progress bar: pressing "Start sending" arms a CSS
-//    animation that sweeps a green fill across the amber button left→right
-//    (0→100% over 10s) and loops (drops back to the left and repeats), and the
-//    label switches to "Sending…". Closing the overlay — by the ✕, the backdrop
+// ── Offline sync — simulated progress ─────────────────────────────────────────
+//    Each action button IS its own progress bar: a green fill sweeps across the
+//    amber button left→right as a CSS animation.
+//    • "Start sending"  → label "Sending…", fills 0→100% over 10s and LOOPS
+//      (drops back to the left and repeats), plus the "sending on a loop" hint.
+//    • "Start receiving" → label "Receiving…", fills 0→100% over 10s ONCE and
+//      stays full (no loop).
+//    Both only run after a press. Closing the overlay — by the ✕, the backdrop
 //    or the system Back button, all of which just drop data-siano-offlinesync on
-//    <html> — stops it, resets the fill and restores the label, so it only ever
-//    runs after a press. The modal markup is static in index.html (never
-//    repainted), so a direct listener is safe. Placeholder — no transfer yet.
+//    <html> — stops them, resets the fills and restores the labels. The modal
+//    markup is static in index.html (never repainted), so direct listeners are
+//    safe. Placeholder — no transfer logic yet.
 function wireOfflineSyncSim() {
   const modal = document.getElementById("offline-sync-modal");
   if (!modal) return;
   const sendBtn = modal.querySelector("[data-siano-offlinesync-send]");
-  if (!sendBtn) return;
+  const recvBtn = modal.querySelector("[data-siano-offlinesync-receive]");
+  if (!sendBtn && !recvBtn) return;
   const sendingNote = modal.querySelector(".osync-sending-note");
-  const idleLabel = sendBtn.textContent; // "Start sending"
+  const sendLabel = sendBtn && sendBtn.textContent; // "Start sending"
+  const recvLabel = recvBtn && recvBtn.textContent; // "Start receiving"
 
-  sendBtn.addEventListener("click", () => {
-    sendBtn.classList.remove("is-sending");
-    void sendBtn.offsetWidth; // force reflow so a re-press restarts the fill from 0
-    sendBtn.classList.add("is-sending");
-    sendBtn.setAttribute("aria-busy", "true");
-    sendBtn.textContent = "Sending…";
+  // (Re)start a button's CSS fill from 0, even if it is already running.
+  const arm = (btn, cls, busyLabel) => {
+    btn.classList.remove(cls);
+    void btn.offsetWidth; // force reflow so a re-press restarts the fill from 0
+    btn.classList.add(cls);
+    btn.setAttribute("aria-busy", "true");
+    btn.textContent = busyLabel;
+  };
+  const disarm = (btn, cls, idleLabel) => {
+    btn.classList.remove(cls);
+    btn.removeAttribute("aria-busy");
+    btn.textContent = idleLabel;
+  };
+
+  if (sendBtn) sendBtn.addEventListener("click", () => {
+    arm(sendBtn, "is-sending", "Sending…");
     if (sendingNote) sendingNote.classList.remove("hidden");
   });
+  if (recvBtn) recvBtn.addEventListener("click", () => arm(recvBtn, "is-receiving", "Receiving…"));
 
   new MutationObserver(() => {
-    if (!document.documentElement.hasAttribute("data-siano-offlinesync")) {
-      sendBtn.classList.remove("is-sending");
-      sendBtn.removeAttribute("aria-busy");
-      sendBtn.textContent = idleLabel;
-      if (sendingNote) sendingNote.classList.add("hidden");
-    }
+    if (document.documentElement.hasAttribute("data-siano-offlinesync")) return;
+    if (sendBtn) disarm(sendBtn, "is-sending", sendLabel);
+    if (recvBtn) disarm(recvBtn, "is-receiving", recvLabel);
+    if (sendingNote) sendingNote.classList.add("hidden");
   }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-siano-offlinesync"] });
 }
 

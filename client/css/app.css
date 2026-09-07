@@ -1211,13 +1211,20 @@ button {
    the left (0→100% width) over 10s and loops, sweeping across the amber base
    yellow→green as "progress" advances. Placeholder until the real QR stream
    drives it; armed by is-sending in interactions.js. */
-#offline-sync-modal .osync-btn--go.is-sending {
+#offline-sync-modal .osync-btn--go.is-sending,
+#offline-sync-modal .osync-btn--go.is-receiving {
   background-color: var(--amber-400);
   background-image: linear-gradient(var(--emerald-400), var(--emerald-400));
   background-repeat: no-repeat;
   background-position: left center;
   background-size: 0% 100%;
+}
+/* Sending loops forever; receiving fills once and holds at 100% (forwards). */
+#offline-sync-modal .osync-btn--go.is-sending {
   animation: osync-btn-fill 10s linear infinite;
+}
+#offline-sync-modal .osync-btn--go.is-receiving {
+  animation: osync-btn-fill 10s linear forwards;
 }
 @keyframes osync-btn-fill {
   from { background-size: 0% 100%; }
