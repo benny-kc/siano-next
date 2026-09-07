@@ -1301,12 +1301,17 @@ button {
 .osync-open-btn {
   width: auto;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0 0.5rem;
   font-size: 0.62rem;
   font-weight: var(--fw-semibold);
   white-space: nowrap;
 }
+/* Two rows ("Offline" / "sync") with very little spacing between them. */
 .osync-open-lbl {
+  text-align: center;
+  line-height: 1;
   letter-spacing: 0.01em;
 }
 .round-btn svg {
