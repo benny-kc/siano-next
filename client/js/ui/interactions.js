@@ -15,7 +15,7 @@ import { View } from "./viewstate.js";
 import { ui } from "./board.js";
 import { selectedMember, setSelectedTraveller, clearSelectedTraveller } from "./selection.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/interactions.js", 4);
+registerVersion("js/ui/interactions.js", 5);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag
@@ -98,6 +98,7 @@ function wireOfflineSyncSim() {
   if (!modal) return;
   const sendBtn = modal.querySelector("[data-siano-offlinesync-send]");
   if (!sendBtn) return;
+  const sendingNote = modal.querySelector(".osync-sending-note");
   const idleLabel = sendBtn.textContent; // "Start sending"
 
   sendBtn.addEventListener("click", () => {
@@ -106,6 +107,7 @@ function wireOfflineSyncSim() {
     sendBtn.classList.add("is-sending");
     sendBtn.setAttribute("aria-busy", "true");
     sendBtn.textContent = "Sending…";
+    if (sendingNote) sendingNote.classList.remove("hidden");
   });
 
   new MutationObserver(() => {
@@ -113,6 +115,7 @@ function wireOfflineSyncSim() {
       sendBtn.classList.remove("is-sending");
       sendBtn.removeAttribute("aria-busy");
       sendBtn.textContent = idleLabel;
+      if (sendingNote) sendingNote.classList.add("hidden");
     }
   }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-siano-offlinesync"] });
 }

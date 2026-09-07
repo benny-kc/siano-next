@@ -408,6 +408,8 @@
           <!-- The button IS the progress bar: a green fill sweeps across it
                left→right while sending (see .osync-btn--go.is-sending). -->
           <button type="button" class="btn-block osync-btn--go" data-siano-offlinesync-send>Start sending</button>
+          <!-- Shown only while sending (toggled in interactions.js). -->
+          <p class="osync-note osync-note--muted osync-sending-note hidden">All of this trip's bills are being sent on a continuous loop. Now press Receive on the other phone.</p>
           <div class="osync-qr" aria-hidden="true">
             <span class="osync-qr-note">QR code / camera will appear here</span>
           </div>
