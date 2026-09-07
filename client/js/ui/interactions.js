@@ -14,10 +14,11 @@ import { BoardView } from "./boardview.js";
 import { View } from "./viewstate.js";
 import { ui } from "./board.js";
 import { selectedMember, setSelectedTraveller, clearSelectedTraveller } from "./selection.js";
-import { makeEncoder, serializeFrame, toPayload } from "../core/qrstream.js";
+import { makeEncoder, makeDecoder, serializeFrame, parseFrame, toPayload, fromPayload } from "../core/qrstream.js";
 import { encodeText } from "../vendor/qrcode.js";
+import jsQR from "../vendor/jsqr.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/interactions.js", 7);
+registerVersion("js/ui/interactions.js", 8);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag
@@ -101,22 +102,25 @@ function qrFrameSvg(text) {
   } catch { return ""; }
 }
 
-// ── Offline sync — the QR fountain stream (sender) ─────────────────────────────
-//    "Start sending" fountain-encodes the whole trip's ops (core/qrstream.js)
-//    into an ENDLESS stream of coded QR frames and plays them in the placeholder
-//    at ~8/sec (docs/qr-sync.md §4a). The send button IS the progress bar, and
-//    the green fill now means real stream coverage: it advances one step per
-//    frame across one payload-generation (enc.K frames — the whole payload sent
-//    once), then loops as the rateless stream keeps going. The label shows
-//    "Sending…" and the "sending on a loop" hint appears.
+// ── Offline sync — the QR fountain link (sender + receiver) ────────────────────
+//    Two halves of docs/qr-sync.md, both driving the shared placeholder + their
+//    own button-as-progress-bar (green fill = real progress):
 //
-//    "Start receiving" still shows a one-shot placeholder fill/label (the camera
-//    decode + ingest lands in the next step).
+//    "Start sending" fountain-encodes the whole trip's ops (core/qrstream.js)
+//    into an ENDLESS stream of coded QR frames shown at ~8/sec. Its fill advances
+//    one step per frame across one payload-generation (enc.K frames), then loops
+//    as the rateless stream keeps going; the "sending on a loop" hint shows.
+//
+//    "Start receiving" opens the in-PWA camera (getUserMedia — one-time
+//    permission prompt), decodes frames with the vendored jsQR (§5), feeds them
+//    to the fountain decoder, and its fill tracks real decode progress. Once the
+//    payload reconstructs it calls actions.ingestOps() (dedup + persist + re-fold
+//    + repaint — the bills just appear on the board) and shows a done state.
 //
 //    Closing the overlay — the ✕, the backdrop or system Back, all of which drop
-//    data-siano-offlinesync on <html> — stops the stream, restores the QR
-//    placeholder, and resets both buttons. The modal markup is static in
-//    index.html (never repainted), so direct listeners are safe.
+//    data-siano-offlinesync on <html> — stops the stream, releases the camera,
+//    restores the placeholder and resets both buttons. The modal markup is
+//    static in index.html (never repainted), so direct listeners are safe.
 function wireOfflineSyncSim(actions) {
   const modal = document.getElementById("offline-sync-modal");
   if (!modal) return;
@@ -129,16 +133,22 @@ function wireOfflineSyncSim(actions) {
   const sendLabel = sendBtn && sendBtn.textContent; // "Start sending"
   const recvLabel = recvBtn && recvBtn.textContent; // "Start receiving"
 
-  const FRAME_MS = 120; // ~8 QR frames/sec (docs/qr-sync.md: ~5–10/sec)
-  let timer = null;
-
-  const stopStream = () => {
-    if (timer) { clearInterval(timer); timer = null; }
-    if (qrBox && qrIdle != null) qrBox.innerHTML = qrIdle;
-    if (sendBtn) sendBtn.style.backgroundSize = ""; // hand the fill back to CSS
+  const restorePlaceholder = () => { if (qrBox && qrIdle != null) qrBox.innerHTML = qrIdle; };
+  const boxNote = (text) => {
+    if (!qrBox) return;
+    qrBox.innerHTML = '<span class="osync-qr-note"></span>';
+    qrBox.firstChild.textContent = text; // textContent, not HTML — our own strings, but safe by construction
   };
 
+  // ── Sender: fountain-QR stream ──────────────────────────────────────────────
+  const FRAME_MS = 120; // ~8 QR frames/sec (docs/qr-sync.md: ~5–10/sec)
+  let sendTimer = null;
+  const stopStream = () => {
+    if (sendTimer) { clearInterval(sendTimer); sendTimer = null; }
+    if (sendBtn) sendBtn.style.backgroundSize = "";
+  };
   const startStream = () => {
+    stopReceive();
     stopStream();
     const ops = (actions && actions.allOps && actions.allOps()) || [];
     const enc = makeEncoder(toPayload(ops));
@@ -148,12 +158,102 @@ function wireOfflineSyncSim(actions) {
       let text;
       try { text = serializeFrame(enc.next()); } catch { return; }
       if (qrBox) { const svg = qrFrameSvg(text); if (svg) qrBox.innerHTML = svg; }
-      // Real coverage: fill over one generation of frames, then loop.
       if (sendBtn) sendBtn.style.backgroundSize = (((n % gen) + 1) / gen) * 100 + "% 100%";
       n++;
     };
     tick();
-    timer = setInterval(tick, FRAME_MS);
+    sendTimer = setInterval(tick, FRAME_MS);
+  };
+
+  // ── Receiver: camera + jsQR decode + ingest ─────────────────────────────────
+  let recvStream = null;
+  let recvVideo = null;
+  let recvRVFC = null;
+  let recvTimer = null;
+  const stopReceive = () => {
+    if (recvVideo && recvRVFC && recvVideo.cancelVideoFrameCallback) recvVideo.cancelVideoFrameCallback(recvRVFC);
+    recvRVFC = null;
+    if (recvTimer) { clearTimeout(recvTimer); recvTimer = null; }
+    if (recvStream) { recvStream.getTracks().forEach((t) => t.stop()); recvStream = null; }
+    recvVideo = null;
+    if (recvBtn) recvBtn.style.backgroundSize = "";
+  };
+
+  const startReceive = async () => {
+    stopStream();
+    stopReceive();
+    const dec = makeDecoder();
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    } catch {
+      boxNote("Camera unavailable — allow camera access, then tap Start receiving again.");
+      if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel; }
+      return;
+    }
+    // Bailed out (overlay closed) while the permission prompt was up.
+    if (!document.documentElement.hasAttribute("data-siano-offlinesync")) {
+      stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    recvStream = stream;
+    const video = document.createElement("video");
+    video.muted = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.style.cssText = "width:100%;height:100%;object-fit:cover;";
+    video.srcObject = stream;
+    recvVideo = video;
+    if (qrBox) { qrBox.innerHTML = ""; qrBox.appendChild(video); }
+    try { await video.play(); } catch { /* autoplay is muted+inline, should be fine */ }
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+    const finish = (ops) => {
+      const added = (actions && actions.ingestOps && actions.ingestOps(ops)) || [];
+      stopReceive();
+      if (recvBtn) { recvBtn.style.backgroundSize = "100% 100%"; recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = "Received ✓"; }
+      const n = added.length;
+      boxNote(n ? `Received ${n} new ${n === 1 ? "op" : "ops"} 🎉` : "Already up to date — nothing new 🎉");
+    };
+
+    const scan = () => {
+      if (!recvStream || recvVideo !== video) return; // stopped / superseded
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (vw && vh) {
+        const scale = Math.min(1, 640 / vw); // cap width for decode speed
+        const w = Math.max(1, Math.round(vw * scale));
+        const h = Math.max(1, Math.round(vh * scale));
+        if (canvas.width !== w) canvas.width = w;
+        if (canvas.height !== h) canvas.height = h;
+        ctx.drawImage(video, 0, 0, w, h);
+        let img = null;
+        try { img = ctx.getImageData(0, 0, w, h); } catch { img = null; }
+        if (img) {
+          const res = jsQR(img.data, w, h, { inversionAttempts: "dontInvert" });
+          const frame = res && res.data ? parseFrame(res.data) : null;
+          if (frame) {
+            dec.add(frame);
+            if (recvBtn) recvBtn.style.backgroundSize = dec.progress * 100 + "% 100%";
+            if (dec.isComplete()) {
+              let ops = null;
+              try { ops = fromPayload(dec.payload()); } catch { ops = null; }
+              if (ops) { finish(ops); return; }
+            }
+          }
+        }
+      }
+      schedule();
+    };
+    const schedule = () => {
+      if (recvStream !== stream) return;
+      if (video.requestVideoFrameCallback) recvRVFC = video.requestVideoFrameCallback(() => scan());
+      else recvTimer = setTimeout(scan, 100);
+    };
+    schedule();
   };
 
   if (sendBtn) sendBtn.addEventListener("click", () => {
@@ -161,19 +261,25 @@ function wireOfflineSyncSim(actions) {
     sendBtn.setAttribute("aria-busy", "true");
     sendBtn.textContent = "Sending…";
     if (sendingNote) sendingNote.classList.remove("hidden");
+    if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel; }
     startStream();
   });
   if (recvBtn) recvBtn.addEventListener("click", () => {
     recvBtn.classList.remove("is-receiving");
-    void recvBtn.offsetWidth; // force reflow so a re-press restarts the fill from 0
+    void recvBtn.offsetWidth;
     recvBtn.classList.add("is-receiving");
     recvBtn.setAttribute("aria-busy", "true");
     recvBtn.textContent = "Receiving…";
+    if (sendBtn) { sendBtn.classList.remove("is-sending"); sendBtn.removeAttribute("aria-busy"); sendBtn.textContent = sendLabel; }
+    if (sendingNote) sendingNote.classList.add("hidden");
+    startReceive();
   });
 
   new MutationObserver(() => {
     if (document.documentElement.hasAttribute("data-siano-offlinesync")) return;
     stopStream();
+    stopReceive();
+    restorePlaceholder();
     if (sendBtn) { sendBtn.classList.remove("is-sending"); sendBtn.removeAttribute("aria-busy"); sendBtn.textContent = sendLabel; }
     if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel; }
     if (sendingNote) sendingNote.classList.add("hidden");

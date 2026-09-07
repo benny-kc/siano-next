@@ -132,6 +132,10 @@ async function main() {
   const actions = {
     // The whole trip's ops — read by the offline-sync QR stream (sender).
     allOps: () => log.allOps(),
+    // Merge ops decoded from an offline QR stream (receiver). Dedups by opId,
+    // persists, re-folds and repaints via the normal subscribe path; returns the
+    // ops that were actually new.
+    ingestOps: (incoming) => log.ingestMany(incoming),
 
     setTripName: (name) => log.emit((c) => ops.setTripName(c, name)),
 
