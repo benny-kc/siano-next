@@ -30,7 +30,7 @@ import { showOnboarding } from "./ui/onboarding.js";
 import { debugEnabled, setDebugEnabled } from "./ui/debug.js";
 import { dlog, derror } from "./log.js";
 import { registerVersion } from "./version.js";
-registerVersion("js/app.js", 2);
+registerVersion("js/app.js", 3);
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const EMOJIS = ["🍽️", "🍕", "🍔", "🍜", "🍣", "🥘", "🍰", "🍺", "🍷", "☕", "🛒", "🚕", "🏨", "🎟️", "⛽", "🍦"];
@@ -130,12 +130,33 @@ async function main() {
   }
 
   const actions = {
-    // The whole trip's ops — read by the offline-sync QR stream (sender).
-    allOps: () => log.allOps(),
-    // Merge ops decoded from an offline QR stream (receiver). Dedups by opId,
-    // persists, re-folds and repaints via the normal subscribe path; returns the
-    // ops that were actually new.
-    ingestOps: (incoming) => log.ingestMany(incoming),
+    // What the offline-sync QR stream (sender) transmits: the trip's identity
+    // (id + name) AND its ops, so the receiver knows which trip these belong to.
+    exportTrip: () => ({ trip: tripId, name: log.snapshot().name || "", ops: log.allOps() }),
+
+    // Receive a decoded offline-sync envelope. Ops are only ever merged into the
+    // trip they belong to — never dumped into whatever trip happens to be open:
+    //   • same trip id  → merge into this device's current log (the normal
+    //     two-devices-on-one-trip sync), repaint via the subscribe path.
+    //   • different trip → create/populate THAT trip's own store on this device
+    //     (its own id ⇒ its own /t/<id> URL), remember it, and hand back its URL
+    //     so the UI can open it. This device's current trip is left untouched.
+    receiveTrip: async (env) => {
+      const incoming = Array.isArray(env) ? env : (env && env.ops);
+      const srcTrip = Array.isArray(env) ? null : (env && env.trip);
+      if (!Array.isArray(incoming)) return { error: true };
+      if (!srcTrip || srcTrip === tripId) {
+        const added = log.ingestMany(incoming);
+        return { sameTrip: true, added: added.length };
+      }
+      const other = await openTripStore(srcTrip);
+      const before = other.allOps().length;
+      other.ingestMany(incoming);
+      const snap = other.snapshot();
+      const name = (env && env.name) || snap.name || "";
+      rememberTrip(srcTrip, name);
+      return { sameTrip: false, trip: srcTrip, name, billCount: snap.billCount, added: other.allOps().length - before, url: `/t/${encodeURIComponent(srcTrip)}` };
+    },
 
     setTripName: (name) => log.emit((c) => ops.setTripName(c, name)),
 
