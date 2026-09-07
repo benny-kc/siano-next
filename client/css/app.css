@@ -1230,13 +1230,15 @@ button {
   from { background-size: 0% 100%; }
   to { background-size: 100% 100%; }
 }
-/* Placeholder square where the streamed QR frames will render later. */
+/* Placeholder square where the streamed QR frames will render later. Full width
+   (like the buttons) but kept square — a bigger code carries more per frame, so
+   transfers go faster. */
 .osync-qr {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 9rem;
-  height: 9rem;
+  width: 100%;
+  aspect-ratio: 1 / 1;
   border-radius: 0.75rem;
   border: 2px dashed var(--slate-700);
   background: var(--slate-800);
