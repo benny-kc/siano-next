@@ -414,14 +414,24 @@ button {
   text-align: center;
   color: var(--slate-500);
 }
-/* The lead prompt shimmers: a slow amber highlight sweeps across the words so
-   the empty board gently draws the eye to the one thing to do next. The
-   gradient is painted into the text (background-clip: text) and slid sideways
-   forever. Theme-aware (amber/slate tokens swap under the light theme); colour
-   emoji in the text keep their own colour (they paint through the colour-glyph
-   path, not the transparent text fill). The .sub tip below stays muted. */
-.board-empty span:not(.sub) {
+/* Only the opening call to action ("Drag a traveller up here") is highlighted,
+   not the whole paragraph. Give it a touch of weight; it stays calm until the
+   trip has at least one traveller, at which point .has-travellers turns on the
+   shimmer below (before that, the bottom dock hint shimmers instead). */
+.board-empty .shine {
   font-weight: var(--fw-semibold);
+  color: var(--slate-400);
+}
+
+/* Shimmer: a slow amber highlight swept across just these words via a moving
+   gradient painted into the text (background-clip: text) and slid sideways
+   forever. Theme-aware (amber/slate tokens swap under the light theme); colour
+   emoji keep their own colour (they paint through the colour-glyph path, not the
+   transparent text fill). Used for the board CTA once travellers exist, and (see
+   the .dock-empty rule, which repeats these bits because it also resets the
+   button background) for the bottom "add your first traveller" hint while the
+   trip still has nobody. */
+.board-empty.has-travellers .shine {
   background-image: linear-gradient(
     90deg,
     var(--slate-500) 0%,
@@ -433,9 +443,9 @@ button {
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  animation: board-empty-shimmer 5s linear infinite;
+  animation: siano-shimmer 5s linear infinite;
 }
-@keyframes board-empty-shimmer {
+@keyframes siano-shimmer {
   to {
     background-position: 200% center;
   }
@@ -830,25 +840,33 @@ button {
   border-radius: 999px;
 }
 /* The empty-dock placeholder is a real <button> (a first-run tap target that
-   opens Settings and blinks the "Add traveller" field), styled to read like the
-   plain hint text it replaced. */
+   opens Settings and blinks the "Add traveller" field). While the trip has no
+   travellers at all it carries the shimmer (the board CTA stays calm until
+   someone is added), so it repeats the gradient bits from .shine above on top of
+   its own button reset — a plain `background:` here would wipe the gradient. */
 .dock-empty {
   appearance: none;
   -webkit-appearance: none;
   margin: 0;
   border: none;
-  background: transparent;
   padding: 0.75rem 0.5rem;
   font: inherit;
   font-size: 0.875rem;
-  color: var(--slate-500);
   text-align: center;
   cursor: pointer;
-  transition: color 0.15s;
-}
-.dock-empty:hover,
-.dock-empty:active {
-  color: var(--slate-300);
+  background-color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    var(--slate-500) 0%,
+    var(--amber-400) 50%,
+    var(--slate-500) 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: siano-shimmer 5s linear infinite;
 }
 
 /* First-run hint: tapping the empty dock blinks the Settings "Add traveller"
