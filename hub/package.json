@@ -2,6 +2,7 @@
   "name": "siano-next-hub",
   "version": "0.0.0",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "description": "Dumb, durable WebSocket relay for Siano trips. No dependencies — runs on Node 18+.",
   "engines": { "node": ">=18" },

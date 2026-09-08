@@ -66,6 +66,8 @@ const MIME = {
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
+  ".txt": "text/plain; charset=utf-8",
+  ".xml": "application/xml; charset=utf-8",
 };
 
 // A tight CSP for a fully self-contained app: only same-origin scripts/styles,
@@ -371,7 +373,13 @@ function makeServeStatic(cfg, assets, metrics, forceHttps, webhook) {
     let rel = decodeURIComponent(url.pathname);
     if (rel === "/") rel = "/index.html";
     // A trip deep-link (/t/<id>) is a client route — serve the app shell.
-    if (rel.startsWith("/t/")) rel = "/index.html";
+    // The <id> is the trip's capability (its password), so these URLs must never
+    // be indexed: send `X-Robots-Tag: noindex` (robust even for a link that leaks
+    // to a crawler externally, which a robots.txt Disallow alone can't stop).
+    if (rel.startsWith("/t/")) {
+      res.setHeader("X-Robots-Tag", "noindex");
+      rel = "/index.html";
+    }
 
     // Fingerprinted serving (in memory): the rewritten shell + service worker
     // (stable URLs, no-cache) and the content-hashed assets (immutable). Anything
