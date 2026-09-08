@@ -853,6 +853,14 @@ button {
   font: inherit;
   font-size: 0.875rem;
   text-align: center;
+  /* Cap the width so the hint wraps to a few short lines instead of one long
+     line — otherwise, in landscape (the dock is a content-sized side column,
+     see the orientation rule below) the full sentence stretches the column
+     wide and eats the board. margin-inline keeps it centred in the wide
+     portrait dock. */
+  max-width: 18rem;
+  margin-inline: auto;
+  line-height: 1.35;
   cursor: pointer;
   background-color: transparent;
   background-image: linear-gradient(
@@ -984,6 +992,13 @@ button {
     width: auto;
     position: relative;
     margin: -0.3rem;
+  }
+  /* Empty-state hint: keep the side column narrow. A tighter cap wraps the
+     sentence over several short lines rather than letting it widen the dock
+     (and shrink the board) in landscape. */
+  .dock-empty {
+    max-width: 10rem;
+    padding-inline: 0.25rem;
   }
   .dock .traveller-token:hover,
   .dock .traveller-token:active {
