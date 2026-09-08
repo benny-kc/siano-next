@@ -96,4 +96,14 @@ a hardened systemd unit are in **[docs/security.md](docs/security.md)**.
 
 ## License
 
-Apache-2.0 (same as the reference app). See [LICENSE](LICENSE).
+**PolyForm Noncommercial License 1.0.0** — see [LICENSE](LICENSE).
+
+- **Noncommercial use is free.** You may use, copy, modify, and share Siano for
+  any noncommercial purpose at no charge.
+- **Commercial use requires a separate license.** Any commercial use — in or for
+  a business, a paid product or service, or anything for commercial advantage or
+  monetary compensation — is permitted only under a commercial license granted by
+  the licensor. To obtain one, contact **online.9144@gmail.com**.
+
+Vendored third-party components (the QR encoder/decoder under `client/js/vendor/`)
+keep their own upstream licenses — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
