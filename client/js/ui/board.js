@@ -27,12 +27,12 @@ import { installState } from "./install.js";
 import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 9);
+registerVersion("js/ui/board.js", 10);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
   billsFilter: null, // member id, or null for "all bills"
-  billsSort: "created_asc",
+  billsSort: "created_desc", // newest bill first (bills arrive oldest-first, so reverse)
   editingShare: null, // "mealId:memberId" while a share is being typed
   ledgerMember: null, // which traveller the personal ledger is showing
   quickAddMealId: null, // meal awaiting a transient "+ add all" (set by app.js)

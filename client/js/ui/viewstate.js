@@ -15,7 +15,7 @@
 //   data-siano-offlinesync = present when the Offline sync overlay is open
 
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/viewstate.js", 2);
+registerVersion("js/ui/viewstate.js", 3);
 
 const root = document.documentElement;
 
@@ -55,6 +55,12 @@ export const View = {
     if (which !== "bills" && which !== "menu") return;
     root.setAttribute("data-siano-drawer", which);
     this.closeSortMenu();
+    // Always reveal a freshly-opened drawer at its top-left. A long bill title
+    // can widen the Bills drawer's scroll area; an accidental horizontal swipe
+    // then leaves it scrolled right (and only partly showing each bill) the next
+    // time it opens. Reset both axes so every open starts at the first bill.
+    const el = document.getElementById(which === "bills" ? "bills" : "menu");
+    if (el) { el.scrollTop = 0; el.scrollLeft = 0; }
     History.sync();
   },
   closeDrawer() {
