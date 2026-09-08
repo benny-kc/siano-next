@@ -16,10 +16,67 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Siano" />
-    <title>Siano</title>
+    <title>Siano — Split trip costs &amp; bills with friends</title>
     <link rel="icon" href="data:," />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!--
+      SEO / discoverability. The bare "/" is the one canonical, indexable page;
+      it mints a trip and rewrites the URL to /t/<id> at runtime (app.js), so the
+      canonical below keeps search engines pointed at "/" no matter which minted
+      URL they render. The /t/<id> URLs are secret capabilities (the id is the
+      trip's password) — they must NEVER be indexed; the hub sends
+      `X-Robots-Tag: noindex` for every /t/ path and robots.txt disallows /t/.
+      The JSON-LD below is a data block (type=application/ld+json), NOT executable
+      script, so the tight `script-src 'self'` CSP does not refuse it. It labels
+      Siano a free FinanceApplication so Google can recognise it as a
+      cost-sharing app. Keep the description/OG/canonical in sync with siano.online.
+    -->
+    <meta
+      name="description"
+      content="Siano is a free, offline-first app for splitting trip costs and bills with friends. Add travellers, drag each bill to split it evenly or by custom shares, and settle up — no sign-up, works offline, syncs live across every phone."
+    />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://siano.online/" />
+
+    <!-- Open Graph — rich preview when the link is shared (chat, social). -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Siano" />
+    <meta property="og:title" content="Siano — Split trip costs &amp; bills with friends" />
+    <meta
+      property="og:description"
+      content="A free, offline-first app for splitting trip costs and bills with friends. Drag to split, settle up, sync live — no sign-up."
+    />
+    <meta property="og:url" content="https://siano.online/" />
+    <meta property="og:image" content="https://siano.online/icons/icon-512.png" />
+    <meta property="og:image:alt" content="Siano" />
+
+    <!-- Twitter/X card -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Siano — Split trip costs &amp; bills with friends" />
+    <meta
+      name="twitter:description"
+      content="A free, offline-first app for splitting trip costs and bills with friends. Drag to split, settle up, sync live — no sign-up."
+    />
+    <meta name="twitter:image" content="https://siano.online/icons/icon-512.png" />
+
+    <!-- Structured data: tells Google this is a free finance/cost-sharing app.
+         A data block, not executable JS — allowed under `script-src 'self'`. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Siano",
+        "url": "https://siano.online/",
+        "description": "A free, offline-first app for splitting trip costs and bills with friends. Add travellers, drag each bill to split it evenly or by custom shares, and settle up — no sign-up, works offline, syncs live across every phone.",
+        "applicationCategory": "FinanceApplication",
+        "operatingSystem": "Any (modern web browser)",
+        "browserRequirements": "Requires JavaScript",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
 
     <!--
       Poor/zero-coverage first load (see CLAUDE.md "mobile load, poor coverage").

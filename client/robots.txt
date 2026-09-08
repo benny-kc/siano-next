@@ -1,0 +1,9 @@
+# Siano — crawl policy.
+# Everything is crawlable EXCEPT /t/<id> trip URLs: the id is the trip's
+# capability (its password), so those pages must never be indexed. The hub also
+# sends `X-Robots-Tag: noindex` on every /t/ response as a belt-and-suspenders
+# guarantee (a Disallow alone can still index an externally-linked URL).
+User-agent: *
+Disallow: /t/
+
+Sitemap: https://siano.online/sitemap.xml

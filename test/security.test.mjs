@@ -28,6 +28,14 @@ async function startHub(t, opts) {
   });
   return { hub, port, dataDir };
 }
+function get(port, path, headers = {}) {
+  return new Promise((resolve) =>
+    http.get({ host: "127.0.0.1", port, path, headers }, (r) => {
+      let body = ""; r.setEncoding("utf8");
+      r.on("data", (c) => (body += c));
+      r.on("end", () => resolve({ status: r.statusCode, headers: r.headers, body }));
+    }));
+}
 function open(url) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url);
@@ -137,11 +145,44 @@ test("index.html has no inline <script> that the tight CSP would refuse", async 
   for (const [, attrs, inner] of scripts) {
     const hasSrc = /\bsrc\s*=/.test(attrs);
     const hasBody = inner.trim() !== "";
+    // A non-JS `type` (e.g. application/ld+json for SEO structured data) is a
+    // DATA block — the browser never executes it, so `script-src 'self'` does
+    // not refuse it and it needs no src. Only executable inline bodies are the risk.
+    const isDataBlock = /\btype\s*=\s*["']application\/ld\+json["']/i.test(attrs);
     assert.ok(
-      hasSrc || !hasBody,
+      hasSrc || !hasBody || isDataBlock,
       `inline <script> body found (\"${inner.trim().slice(0, 40)}…\") — CSP script-src 'self' will refuse it; move it to an external same-origin file`,
     );
   }
+});
+
+test("crawl policy: /robots.txt disallows /t/ and points to the sitemap", async (t) => {
+  const { port } = await startHub(t);
+  const { status, headers, body } = await get(port, "/robots.txt");
+  assert.equal(status, 200);
+  assert.match(headers["content-type"] || "", /text\/plain/);
+  assert.match(body, /Disallow:\s*\/t\//);
+  assert.match(body, /Sitemap:\s*https:\/\/siano\.online\/sitemap\.xml/);
+});
+
+test("crawl policy: /sitemap.xml lists the canonical landing page", async (t) => {
+  const { port } = await startHub(t);
+  const { status, headers, body } = await get(port, "/sitemap.xml");
+  assert.equal(status, 200);
+  assert.match(headers["content-type"] || "", /xml/);
+  assert.match(body, /<loc>https:\/\/siano\.online\/<\/loc>/);
+});
+
+test("trip URLs are noindex, the homepage is indexable", async (t) => {
+  const { port } = await startHub(t);
+  // A /t/<id> capability URL must carry X-Robots-Tag: noindex...
+  const trip = await get(port, "/t/abc123");
+  assert.equal(trip.status, 200);
+  assert.equal(trip.headers["x-robots-tag"], "noindex");
+  // ...while the canonical landing page must NOT be blocked from indexing.
+  const home = await get(port, "/");
+  assert.equal(home.status, 200);
+  assert.equal(home.headers["x-robots-tag"], undefined);
 });
 
 test("static responses are revalidated (no-cache + ETag), so a CDN never pins a stale shell", async (t) => {
