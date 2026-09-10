@@ -539,7 +539,7 @@ button {
   gap: 0.25rem;
   z-index: 5;
 }
-.icon-btn {
+.icon-tile {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -552,7 +552,7 @@ button {
   touch-action: manipulation;
   transition: transform 0.06s;
 }
-.icon-btn:active {
+.icon-tile:active {
   transform: scale(0.9);
 }
 
