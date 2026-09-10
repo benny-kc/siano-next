@@ -27,7 +27,7 @@ import { installState } from "./install.js";
 import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 12);
+registerVersion("js/ui/board.js", 13);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -79,7 +79,7 @@ function iconGrid(meal, actions) {
   },
     ...ui.iconPickerIcons.map((icon) =>
       el("button", {
-        type: "button", class: "icon-btn",
+        type: "button", class: "icon-tile",
         title: "Use this icon", onclick: () => actions.setMealEmoji(meal.id, icon),
       }, icon)),
   );
