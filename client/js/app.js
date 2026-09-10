@@ -19,7 +19,7 @@ import { SyncClient } from "./sync/client.js";
 import * as ops from "./core/ops.js";
 import { parse } from "./core/money.js";
 import { initialsFor } from "./core/snapshot.js";
-import { render, ui, downloadReportCsv } from "./ui/board.js";
+import { render, ui, downloadReportCsv, randomMealIcons } from "./ui/board.js";
 import { BoardView } from "./ui/boardview.js";
 import { installViewState, View } from "./ui/viewstate.js";
 import { initInteractions } from "./ui/interactions.js";
@@ -30,7 +30,7 @@ import { showOnboarding } from "./ui/onboarding.js";
 import { debugEnabled, setDebugEnabled } from "./ui/debug.js";
 import { dlog, derror } from "./log.js";
 import { registerVersion } from "./version.js";
-registerVersion("js/app.js", 3);
+registerVersion("js/app.js", 4);
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const EMOJIS = ["🍽️", "🍕", "🍔", "🍜", "🍣", "🥘", "🍰", "🍺", "🍷", "☕", "🛒", "🚕", "🏨", "🎟️", "⛽", "🍦"];
@@ -176,6 +176,23 @@ async function main() {
       log.emit((c) => ops.addMeal(c, uid("meal-"), { name: "", emoji: pick(EMOJIS), x, y, open: true }));
     },
     setMealName: (id, name) => log.emit((c) => ops.setMealName(c, id, name)),
+
+    // Open the icon-picker grid above a meal's card (or re-shuffle it if it is
+    // already open for that meal), with a fresh random set of icons each time, and
+    // keep/return focus to the name field so the icon can be chosen while naming.
+    openMealIcons: (id) => {
+      ui.iconPickerMealId = id;
+      ui.iconPickerIcons = randomMealIcons();
+      ui.focusMealNameId = id;
+      schedulePaint();
+    },
+    // Pick an icon from the grid. The grid stays open (a change of mind is cheap);
+    // focus returns to the name field after the emit-driven repaint.
+    setMealEmoji: (id, emoji) => {
+      ui.focusMealNameId = id;
+      log.emit((c) => ops.setMealEmoji(c, id, emoji));
+    },
+
     removeMeal: (id) => log.emit((c) => ops.removeMeal(c, id)),
     closeMeal: (id) => log.emit((c) => ops.setOpen(c, id, false)),
     openMeal: (id) => {

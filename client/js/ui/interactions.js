@@ -18,7 +18,7 @@ import { makeEncoder, makeDecoder, serializeFrame, parseFrame, packOps, unpackOp
 import { encodeText } from "../vendor/qrcode.js";
 import jsQR from "../vendor/jsqr.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/interactions.js", 11);
+registerVersion("js/ui/interactions.js", 12);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag
@@ -39,6 +39,7 @@ export function initInteractions({ actions, schedulePaint }) {
   wirePanZoom(surface);
   wireTravellerDrag(dock, surface, actions);
   wireCardDrag(canvas, actions);
+  wireIconPickerDismiss();
   wireLongPress(canvas, schedulePaint);
 
   // Expose a pan-to helper for "open a bill onto the board" (called by app.js).
@@ -571,26 +572,58 @@ function wireTravellerDrag(dock, surface, actions) {
   });
 }
 
-// ── Meal-card drag by its handle (delegated on #board-canvas). Mirrors
-//    hooks/meal_card.js. Bring-to-front on any pointerdown within a card. ───────
+// ── Meal-card drag (delegated on #board-canvas). Mirrors hooks/meal_card.js.
+//    Bring-to-front on any pointerdown within a card. The card drags by three
+//    handles: the grip (⠿), the icon field and the meal-name field. The grip
+//    starts a drag immediately; the icon and name fields wait for a little travel
+//    (DRAG_THRESH) before committing to a drag, so a plain TAP on either is an
+//    edit gesture instead — tapping the name focuses it to rename, and tapping the
+//    icon opens (or re-randomises) the icon-picker grid above the card AND focuses
+//    the name so the user can pick an icon while naming the bill. The name field
+//    keeps its native focus (so the caret lands where tapped and the mobile
+//    keyboard opens reliably); the grip and icon span suppress the native default
+//    so they don't select text / raise the iOS callout. ──────────────────────────
 function wireCardDrag(canvas, actions) {
   canvas.addEventListener("pointerdown", (e) => {
     const card = e.target.closest(".meal-card");
     if (card) card.style.zIndex = String(++zCounter); // raise on any interaction
 
-    const handle = e.target.closest(".drag-handle");
+    const grip = e.target.closest(".drag-grip");
+    const emoji = grip ? null : e.target.closest(".drag-emoji");
+    const nameField = grip || emoji ? null : e.target.closest(".meal-name");
+    const handle = grip || emoji || nameField;
     if (!handle || !card) return;
     if (e.button != null && e.button > 0) return;
-    e.preventDefault();
-    e.stopPropagation();
 
-    window.__sianoDragging = true;
-    card.classList.add("raised");
+    // Suppress the native default for the grip and icon span only — the name field
+    // must keep its native focus/caret behaviour (see the comment above).
+    if (!nameField) { e.preventDefault(); e.stopPropagation(); }
+
+    const mealId = card.dataset.mealId;
+    const thresholded = !grip; // edit fields wait for travel; the grip drags at once
     const startX = e.clientX, startY = e.clientY;
     const originLeft = parseFloat(card.style.left) || 0;
     const originTop = parseFloat(card.style.top) || 0;
+    let dragging = false;
+
+    const beginDrag = () => {
+      dragging = true;
+      window.__sianoDragging = true;
+      card.classList.add("raised");
+      // If a drag starts on the name field, drop its focus + any text selection so
+      // the keyboard/caret don't fight the move.
+      if (nameField) {
+        try { document.activeElement && document.activeElement.blur(); } catch { /* ignore */ }
+        try { window.getSelection()?.removeAllRanges(); } catch { /* ignore */ }
+      }
+    };
+    if (!thresholded) beginDrag();
 
     const onMove = (ev) => {
+      if (!dragging) {
+        if (Math.abs(ev.clientX - startX) <= DRAG_THRESH && Math.abs(ev.clientY - startY) <= DRAG_THRESH) return;
+        beginDrag();
+      }
       const left = originLeft + (ev.clientX - startX) / BoardView.scale;
       const top = originTop + (ev.clientY - startY) / BoardView.scale;
       card.style.left = `${left}px`;
@@ -602,14 +635,43 @@ function wireCardDrag(canvas, actions) {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
-      card.classList.remove("raised");
-      setTimeout(() => { window.__sianoDragging = false; }, 0);
-      actions.moveMeal(card.dataset.mealId, Math.round(parseFloat(card.dataset.x)), Math.round(parseFloat(card.dataset.y)));
+      if (dragging) {
+        card.classList.remove("raised");
+        setTimeout(() => { window.__sianoDragging = false; }, 0);
+        actions.moveMeal(mealId, Math.round(parseFloat(card.dataset.x)), Math.round(parseFloat(card.dataset.y)));
+      } else if (emoji) {
+        // A tap on the icon field: open the picker, or re-shuffle it if already open.
+        actions.openMealIcons(mealId);
+      } else if (nameField) {
+        // A tap on the name field: native focus normally already placed the caret,
+        // but ensure it if the default was somehow swallowed.
+        const input = card.querySelector(".meal-name");
+        if (input && document.activeElement !== input) input.focus();
+      }
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
   });
+}
+
+// ── Dismiss the meal-icon picker when the user interacts anywhere outside it.
+//    Runs in the CAPTURE phase so it settles the picker state before the card's
+//    own pointerdown handler acts. Taps inside the grid, or on the open meal's own
+//    icon/name fields (which re-shuffle / keep editing), are left alone. Closing
+//    removes the grid node directly rather than repainting, so an input the user
+//    is tapping keeps its focus and caret (a repaint would replace it). ──────────
+function wireIconPickerDismiss() {
+  document.addEventListener("pointerdown", (e) => {
+    if (ui.iconPickerMealId == null) return;
+    if (e.target.closest(".icon-grid")) return; // a tile tap — handled by its onclick
+    const card = e.target.closest(".meal-card");
+    if (card && card.dataset.mealId === ui.iconPickerMealId &&
+        e.target.closest(".drag-emoji, .meal-name")) return; // this card's edit fields
+    ui.iconPickerMealId = null;
+    ui.iconPickerIcons = [];
+    document.querySelector(".icon-grid")?.remove();
+  }, true);
 }
 
 // ── Long-press a participant name to edit their exact share; short tap arms

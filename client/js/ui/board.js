@@ -27,7 +27,7 @@ import { installState } from "./install.js";
 import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 10);
+registerVersion("js/ui/board.js", 11);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -36,7 +36,54 @@ export const ui = {
   editingShare: null, // "mealId:memberId" while a share is being typed
   ledgerMember: null, // which traveller the personal ledger is showing
   quickAddMealId: null, // meal awaiting a transient "+ add all" (set by app.js)
+  iconPickerMealId: null, // meal whose icon-picker grid is open above its card
+  iconPickerIcons: [], // the 25 randomly-chosen icons currently shown in that grid
+  focusMealNameId: null, // meal whose name field should regain focus after a repaint
 };
+
+// ── Meal-icon picker ──────────────────────────────────────────────────────────
+// A pool of travel- and meal-related emoji to offer when the user wants a more
+// fitting icon for a bill. The grid shows a RANDOM 25 of these each time it opens
+// (and re-shuffles on every tap of the meal's icon field), so the choices feel
+// fresh rather than a fixed menu.
+const ICON_POOL = [
+  "🍽️", "🍕", "🍔", "🍟", "🌭", "🥪", "🌮", "🌯", "🥙", "🧆",
+  "🍜", "🍝", "🍣", "🍱", "🍛", "🍲", "🥘", "🥗", "🍤", "🍗",
+  "🥩", "🥞", "🧇", "🥐", "🥖", "🧀", "🍰", "🧁", "🍩", "🍪",
+  "🍦", "🍧", "🍨", "☕", "🍵", "🧃", "🥤", "🍺", "🍷", "🍸",
+  "🍹", "🥂", "🧉", "🚕", "🚗", "🚌", "🚆", "🚝", "✈️", "🚢",
+  "⛴️", "🚁", "🏨", "⛺", "🎟️", "⛽", "🗺️", "🧳", "🏖️", "🏔️",
+  "🎢", "🎡", "🛒", "🛍️", "🎁", "💊", "⚕️",
+];
+
+/** Pick `n` distinct random icons from the pool (Fisher–Yates partial shuffle). */
+export function randomMealIcons(n = 25) {
+  const pool = ICON_POOL.slice();
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, Math.min(n, pool.length));
+}
+
+// The 5×5 grid of icon choices, rendered right above the meal card while its icon
+// picker is open. Tapping a tile sets the meal's emoji (the card keeps editing, so
+// the picker stays up to allow a change of mind). Tiles preventDefault their
+// pointerdown so tapping one never blurs the meal-name field / dismisses the
+// keyboard; the dismiss-on-outside-tap handler in interactions.js ignores taps
+// inside `.icon-grid`.
+function iconGrid(meal, actions) {
+  return el("div", {
+    class: "icon-grid", "aria-label": "Choose an icon",
+    onpointerdown: (e) => e.preventDefault(),
+  },
+    ...ui.iconPickerIcons.map((icon) =>
+      el("button", {
+        type: "button", class: "icon-btn" + (icon === meal.emoji ? " is-current" : ""),
+        title: "Use this icon", onclick: () => actions.setMealEmoji(meal.id, icon),
+      }, icon)),
+  );
+}
 
 // ── DOM helper ────────────────────────────────────────────────────────────────
 function el(tag, props = {}, ...kids) {
@@ -135,10 +182,10 @@ function mealCard(meal, snap, actions) {
   // header: grip + emoji (both drag handles), name, close
   const head = el("div", { class: "meal-head" },
     el("span", { class: "drag-handle drag-grip", title: "Drag to move" }, "⠿"),
-    el("span", { class: "drag-handle drag-emoji", title: "Drag to move" }, meal.emoji || "🍽️"),
+    el("span", { class: "drag-handle drag-emoji", title: "Tap to change icon · drag to move" }, meal.emoji || "🍽️"),
     el("input", {
       class: "meal-name", value: meal.name, placeholder: "Meal name", "aria-label": "Meal name",
-      title: "Tap to rename", ...NO_AUTOFILL, autocapitalize: "words",
+      title: "Tap to rename · drag to move", ...NO_AUTOFILL, autocapitalize: "words",
       onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } },
       onchange: (e) => actions.setMealName(meal.id, e.target.value),
     }),
@@ -216,6 +263,7 @@ function mealCard(meal, snap, actions) {
     class: "meal-card animate-pop", style: `left:${meal.x}px; top:${meal.y}px;`,
     dataset: { mealId: meal.id, x: meal.x, y: meal.y },
   },
+    ui.iconPickerMealId === meal.id ? iconGrid(meal, actions) : null,
     head, total, dropzone,
     meal.participants.length ? el("p", { class: "meal-hint" }, "hold a name to set an exact share · 💳 marks who paid") : null,
     foot,
@@ -1026,4 +1074,19 @@ export function render(snap, actions) {
   // Autofocus a freshly-opened inline share editor.
   const focusEl = canvas.querySelector("[data-autofocus]");
   if (focusEl) { focusEl.focus(); if (focusEl.select) focusEl.select(); }
+
+  // Restore focus to a meal name field that was being edited when the icon picker
+  // opened or an icon was picked (a repaint replaces the input node, so its focus
+  // is otherwise lost). Caret to the end rather than select-all — the user is
+  // typing a name, not replacing it. One-shot: cleared once applied.
+  if (ui.focusMealNameId != null) {
+    const card = canvas.querySelector(`[data-meal-id="${CSS.escape(ui.focusMealNameId)}"]`);
+    const nameEl = card && card.querySelector(".meal-name");
+    ui.focusMealNameId = null;
+    if (nameEl && document.activeElement !== nameEl) {
+      nameEl.focus();
+      const n = nameEl.value.length;
+      try { nameEl.setSelectionRange(n, n); } catch { /* not all inputs support it */ }
+    }
+  }
 }
