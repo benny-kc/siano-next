@@ -30,7 +30,7 @@ import { showOnboarding } from "./ui/onboarding.js";
 import { debugEnabled, setDebugEnabled } from "./ui/debug.js";
 import { dlog, derror } from "./log.js";
 import { registerVersion } from "./version.js";
-registerVersion("js/app.js", 4);
+registerVersion("js/app.js", 5);
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const EMOJIS = ["🍽️", "🍕", "🍔", "🍜", "🍣", "🥘", "🍰", "🍺", "🍷", "☕", "🛒", "🚕", "🏨", "🎟️", "⛽", "🍦"];
@@ -186,9 +186,11 @@ async function main() {
       ui.focusMealNameId = id;
       schedulePaint();
     },
-    // Pick an icon from the grid. The grid stays open (a change of mind is cheap);
-    // focus returns to the name field after the emit-driven repaint.
+    // Pick an icon from the grid: set the emoji, close the picker, and return
+    // focus to the name field. The emit drives the repaint that removes the grid.
     setMealEmoji: (id, emoji) => {
+      ui.iconPickerMealId = null;
+      ui.iconPickerIcons = [];
       ui.focusMealNameId = id;
       log.emit((c) => ops.setMealEmoji(c, id, emoji));
     },

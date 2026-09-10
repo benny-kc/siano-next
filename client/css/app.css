@@ -522,47 +522,38 @@ button {
   border-color: var(--amber-400);
   background: var(--slate-800);
 }
-/* The meal-icon picker: a 5×5 grid of random travel/meal icons floated right
-   above the card while its name is being edited. It's a child of the absolutely
-   positioned .meal-card, so it pans/zooms and moves with the card. */
+/* The meal-icon picker: a square 5×5 grid of random travel/meal icons floated
+   right above the card while its name is being edited. It's a child of the
+   absolutely positioned .meal-card, so it pans/zooms and moves with the card.
+   Bare icons — no panel background, border or button chrome, just the glyphs;
+   it doesn't have to match the card's width, so it's a fixed square. */
 .icon-grid {
   position: absolute;
   left: 0;
-  right: 0;
   bottom: calc(100% + 0.5rem);
+  width: 15rem;
+  aspect-ratio: 1;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: repeat(5, 1fr);
   gap: 0.25rem;
-  padding: 0.5rem;
-  border-radius: 0.75rem;
-  border: 1px solid var(--slate-700);
-  background: var(--panel);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
   z-index: 5;
 }
 .icon-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  aspect-ratio: 1 / 1;
-  border: 1px solid transparent;
-  border-radius: 0.5rem;
-  background: var(--slate-800);
-  font-size: 1.35rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 1.6rem;
   line-height: 1;
   cursor: pointer;
   touch-action: manipulation;
-  transition: border-color 0.12s, transform 0.06s, background 0.12s;
-}
-.icon-btn:hover {
-  border-color: var(--slate-500);
-  background: var(--slate-700);
-}
-.icon-btn.is-current {
-  border-color: var(--amber-400);
+  transition: transform 0.06s;
 }
 .icon-btn:active {
-  transform: scale(0.92);
+  transform: scale(0.9);
 }
 
 .meal-close {

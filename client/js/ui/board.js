@@ -27,7 +27,7 @@ import { installState } from "./install.js";
 import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 11);
+registerVersion("js/ui/board.js", 12);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -66,12 +66,12 @@ export function randomMealIcons(n = 25) {
   return pool.slice(0, Math.min(n, pool.length));
 }
 
-// The 5×5 grid of icon choices, rendered right above the meal card while its icon
-// picker is open. Tapping a tile sets the meal's emoji (the card keeps editing, so
-// the picker stays up to allow a change of mind). Tiles preventDefault their
-// pointerdown so tapping one never blurs the meal-name field / dismisses the
-// keyboard; the dismiss-on-outside-tap handler in interactions.js ignores taps
-// inside `.icon-grid`.
+// The square 5×5 grid of icon choices (bare glyphs, no chrome — see app.css),
+// rendered right above the meal card while its icon picker is open. Tapping a tile
+// sets the meal's emoji and closes the picker (setMealEmoji clears the open state).
+// Tiles preventDefault their pointerdown so the tap never blurs the meal-name field
+// / dismisses the keyboard before the pick registers; the dismiss-on-outside-tap
+// handler in interactions.js ignores taps inside `.icon-grid`.
 function iconGrid(meal, actions) {
   return el("div", {
     class: "icon-grid", "aria-label": "Choose an icon",
@@ -79,7 +79,7 @@ function iconGrid(meal, actions) {
   },
     ...ui.iconPickerIcons.map((icon) =>
       el("button", {
-        type: "button", class: "icon-btn" + (icon === meal.emoji ? " is-current" : ""),
+        type: "button", class: "icon-btn",
         title: "Use this icon", onclick: () => actions.setMealEmoji(meal.id, icon),
       }, icon)),
   );
