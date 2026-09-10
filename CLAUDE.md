@@ -291,6 +291,19 @@ today — keep `core/*` and `ui/*` acyclic (the topo sort depends on it).
   the base rule. This showed up as "the delete-trip Yes/No buttons do nothing" in
   the installed PWA. Any new overlay defaulted to `pointer-events:none` needs the
   same restore.
+- **`app.css` is ONE global, flat, buildless stylesheet — a new class name must
+  be unique across the whole file, or it silently restyles an existing element.**
+  There is no CSS-module / scoping / build step; every rule is global and ties
+  break by **source order** (later rule wins at equal specificity). A generic
+  name like `.icon-btn` was reused for the meal icon-picker tiles, and its later
+  `background: transparent; border: none` overrode the top-bar buttons that
+  already used `.icon-btn` — the amber ➕ add-meal button rendered invisible until
+  a hover/press repaint. Before adding a class, `grep` it across `client/`
+  (`.css`, `.html`, `.js`); if it already exists for something else, pick a
+  distinct, component-scoped name (`.icon-tile`, not `.icon-btn`). The same
+  applies to reused names in the `index.html` critical inline CSS. This is easy
+  to miss because a plain browser tab may still show the old cached rule — verify
+  a real repaint (or bump `CACHE`, see above) before concluding it's fixed.
 
 ---
 
