@@ -167,7 +167,18 @@ Create ops via the `ops.js` constructors (they stamp the clock). Emit them throu
 delta), `peer` (two real hubs: one multiplexed always-on link syncing many trips
 both ways, backlog flush on reconnect, token auth), `security` (caps, oversized-message close,
 Origin/trip-id rejection, rate limit, headers), `metrics` (token-gated
-`/metrics`: 404 when off, bearer auth, live + per-trip series).
+`/metrics`: 404 when off, bearer auth, live + per-trip series), `loadsim` (the
+load simulator drives a real in-process hub: ops flow + relay latency, the Origin
+allowlist admits/refuses, the `1008` rate-limit close, and cross-hub replication).
+
+**Load / stress testing:** `ops/loadsim/loadsim.js` is a dependency-free driver
+(`node ops/loadsim/loadsim.js --url ws://127.0.0.1:4000 --trips 25 --devices 2`)
+that floods a hub with real op traffic and reports connect/relay latency,
+throughput and close codes. It's built to run **through a Cloudflare Tunnel +
+Cloudflare security**: `--origin` for the `SIANO_ALLOWED_ORIGINS` allowlist,
+`--cf-access-id`/`--cf-access-secret` for a Cloudflare **Access service token**,
+and `--fixed-trips` to drive both hubs at once and measure cross-hub sync. Full
+Cloudflare playbook in `ops/loadsim/README.md`.
 
 ---
 
