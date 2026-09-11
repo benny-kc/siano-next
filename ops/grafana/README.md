@@ -54,12 +54,12 @@ unlabeled series until you add it.)
 
 | Section | Panels |
 |---|---|
-| **Overview** | Hub status (`siano_up`), uptime, live connections, active trips, trips on disk, op append rate. |
+| **Overview** | Hub status (`siano_up`), uptime, live connections, active trips, trips on disk, **trips in memory** (`siano_trips_in_memory` — the cached-op-log count the in-memory cap keeps bounded), op append rate. |
 | **Traffic** | Op throughput (appended vs rejected), client message rate, connection churn (open/close), concurrency (connections & active trips). |
 | **Errors & abuse** | Rate-limit closes, bad-JSON frames, WS upgrade rejections by reason. |
 | **Host machines** | Per-host CPU %, memory %, disk `/` used (gauge) + free bytes, load average, app log-file sizes (total + per-file table), and a Hosts info table. Uses the `host_*` metrics from the lightweight shell pusher ([../push/README.md](../push/README.md)); the heavier Alloy/node_exporter path is in [../alloy/README.md](../alloy/README.md). |
 | **Per-trip** | Top trips by ops (table), per-trip live connections, per-trip op append rate. |
-| **Process** | Hub process resident memory (RSS) and V8 heap (distinct from whole-host memory). |
+| **Process** | Hub process resident memory (RSS) and V8 heap (distinct from whole-host memory), plus **trip op-cache in memory vs on disk** (`siano_trips_in_memory` against `siano_trips_total`): the in-memory line should plateau under `SIANO_MAX_TRIPS_IN_MEMORY` and fall back after a burst as idle trips are evicted, while on-disk only grows. A memory line climbing in lockstep with disk is the pre-fix leak. |
 | **Hub-to-hub sync (peer link)** | Peer link status (UP/DOWN per dialer→peer), inbound peer connections, configured peers, peer op flow in/out per sec, and peer reconnects / auth failures. Only the dialing hub reports link status/op-flow; the acceptor reports inbound connections. Empty on a single-hub deployment. |
 
 ## Suggested alerts (Grafana → Alerting)
@@ -68,6 +68,7 @@ unlabeled series until you add it.)
 - **Abuse / flooding** — `sum(rate(siano_rate_limit_closes_total[5m])) > 0` for 10m.
 - **Trip nearing its op cap** — `max(siano_trip_ops) > 0.9 * <SIANO_MAX_OPS_PER_TRIP>`.
 - **Memory creep** — `max(siano_process_resident_memory_bytes)` above your host budget.
+- **Op cache not releasing** — `max(siano_trips_in_memory) > 1.5 * <SIANO_MAX_TRIPS_IN_MEMORY>` sustained (the cache should stay at/under the cap; a persistently higher value means trips aren't being evicted).
 - **Peer link down** — `max(siano_peer_link_up) < 1` for 5m (only where a hub is configured to dial, i.e. `siano_peer_configured > 0`).
 - **Peer link flapping** — `sum(rate(siano_peer_disconnects_total[5m])) > 0` sustained for 15m.
 - **Peer auth failures** — `sum(rate(siano_peer_auth_failures_total[5m])) > 0` (a peer dialing with the wrong `SIANO_PEER_TOKEN`).
