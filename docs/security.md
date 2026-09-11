@@ -36,6 +36,7 @@ What a Cloudflare Tunnel gives you, and what it doesn't:
 | **Heartbeat reaper** | Every `SIANO_HEARTBEAT_MS` (default 30 s) the hub pings each socket and terminates any that missed the previous pong — dead/wedged peers can't leak sockets or memory. |
 | **Rate limiting** | Per-connection fixed-window cap `SIANO_MAX_MSGS_PER_SEC` (default 50). A flooding client is closed `1008`. |
 | **Disk / inode caps** | `SIANO_MAX_OPS_PER_TRIP` and `SIANO_MAX_TRIPS` (both default unlimited — **set them in production**) bound worst-case disk use from the unauthenticated append path. |
+| **In-memory op cache** | A touched trip's ops are cached so reads/appends don't re-parse the file, but the cache is bounded: an LRU cap (`SIANO_MAX_TRIPS_IN_MEMORY`, default 256) drops the coldest trip past the limit, and a trip is released the moment its last device disconnects. So a burst of trips (a load test, an abusive client hammering fresh trip ids) can't pin every trip's op set in the heap for the life of the process — resident memory tracks the trips actually in use, not the on-disk total. The append-only JSONL is the source of truth; a dropped trip re-hydrates on its next access. |
 | **Non-blocking writes** | Op persistence is async with a per-trip serialized write queue; a write flood can't block the event loop, and torn/failed writes are logged, not fatal. |
 | **Input validation** | Trip ids are validated (`^[A-Za-z0-9._~-]{1,SIANO_TRIP_ID_MAX}$`) before use as a filename; ops are shape-checked; malformed frames are dropped. |
 | **Static server** | GET/HEAD only (else `405`); path-traversal blocked (resolved path must stay under the client dir); a `/healthz` endpoint for probes. |
@@ -58,6 +59,7 @@ What a Cloudflare Tunnel gives you, and what it doesn't:
 | `SIANO_ALLOWED_ORIGINS` | *(unset)* | Comma-separated `Origin` allowlist for WS upgrades. **Set this to your app's URL in production.** |
 | `SIANO_MAX_OPS_PER_TRIP` | `0` (∞) | Refuse ops past this many per trip. **Set a generous value (e.g. 100000).** |
 | `SIANO_MAX_TRIPS` | `0` (∞) | Refuse creating new trip files past this many. **Set one if trip creation is unauthenticated.** |
+| `SIANO_MAX_TRIPS_IN_MEMORY` | `256` | LRU cap on how many trips' op logs stay cached in the heap. Past it, the least-recently-used trip is dropped from memory (and any trip is dropped the moment its last device disconnects); it re-reads from the durable JSONL on its next access. This is what keeps resident memory bounded to trips actually in use rather than every trip served this run — a burst of trips no longer pins their ops in the heap for the process life. `0` = unlimited (the old, unbounded behaviour). Lower it on a small box; watch `siano_trips_in_memory` in `/metrics`. |
 | `SIANO_HEARTBEAT_MS` | `30000` | Ping/reap interval. |
 | `SIANO_TRIP_ID_MAX` | `128` | Max trip-id length. |
 | `SIANO_PEER_URL` | *(unset)* | Comma-separated `ws://`/`wss://` URLs of peer hubs to **dial** for hub-to-hub sync (see [Hub-to-hub sync](#hub-to-hub-sync)). Off when unset. |
@@ -104,7 +106,9 @@ Grafana + Prometheus is far too heavy to *run* next to a single loopback-bound
 Node relay, so the hub instead **exposes** metrics in the Prometheus text format
 and lets something small collect them. `GET /metrics` (in `hub/server.js`, series
 built by `hub/metrics.js`) reports live gauges (`siano_ws_connections`,
-`siano_trips_active`, per-trip `siano_trip_connections`/`siano_trip_ops`),
+`siano_trips_active`, `siano_trips_in_memory` (trips whose op log is currently
+cached — watch it stay bounded, not climb with the on-disk total), per-trip
+`siano_trip_connections`/`siano_trip_ops`),
 lifetime counters (`siano_ops_appended_total`, `siano_ops_rejected_total`,
 `siano_ws_upgrade_rejected_total{reason=…}`, `siano_rate_limit_closes_total`, …)
 and a couple of process gauges — no dependencies, nothing to build.
