@@ -237,6 +237,36 @@ trip in the union. For a hub with a very large number of trips or very long trip
 logs, that reconnect pass is proportional to the total op count; digest-based
 reconciliation is a future refinement. Log compaction (roadmap) also bounds it.
 
+## Load / stress testing
+
+The guards above (connection cap, per-connection rate limit, frame bounds,
+disk caps) only matter if you can *see* where they bite under real load. A
+dependency-free driver, [`ops/loadsim/loadsim.js`](../ops/loadsim/README.md),
+opens many WebSocket leaves, drives real op traffic, and reports connect
+latency, op throughput, end-to-end **relay** latency (writer → hub → other
+device), and a histogram of close codes (`1008` rate-limited, `1009` too big,
+`1006`/unopened = an edge or handshake rejection).
+
+It's built to run **through a Cloudflare Tunnel and Cloudflare's security**, not
+just at loopback: it sets `--origin` to satisfy the hub's `SIANO_ALLOWED_ORIGINS`
+allowlist, and presents a Cloudflare **Access service token** (via
+`CF-Access-Client-Id`/`CF-Access-Client-Secret`) so a headless run gets past
+Access at the edge. A WAF rate-limit rule or Bot Fight Mode will (correctly)
+bounce it — scope those around the test with a skip rule on the source IP or a
+custom `--header` marker. It can also drive **both hubs at once** with shared
+`--fixed-trips` ids to measure cross-hub replication latency over the peer link.
+Full playbook in [`ops/loadsim/README.md`](../ops/loadsim/README.md).
+
+```bash
+# 50 sockets at loopback for 10s
+node ops/loadsim/loadsim.js --url ws://127.0.0.1:4000 --trips 25 --devices 2
+
+# through the tunnel, Origin allowlist + Access service token
+node ops/loadsim/loadsim.js --url wss://siano.example.com --origin https://siano.example.com \
+  --cf-access-id "$CF_ACCESS_CLIENT_ID" --cf-access-secret "$CF_ACCESS_CLIENT_SECRET" \
+  --trips 100 --devices 3 --rate 4 --duration 60 --ramp 10
+```
+
 ## Deployment-level hardening (do these too)
 
 The code can't do these for you:
