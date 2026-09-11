@@ -120,7 +120,7 @@
   "timezone": "",
   "title": "Siano Hub",
   "uid": "siano-hub",
-  "version": 6,
+  "version": 7,
   "weekStart": "",
   "panels": [
     {
@@ -451,7 +451,7 @@
     {
       "type": "table",
       "title": "Top trips by ops",
-      "description": "Largest trip logs currently cached in memory, merged across hubs. Only hydrated trips appear here — an idle trip is evicted from the cache (its ops stay on disk), so this lists hot trips, not every trip on disk. Watch against SIANO_MAX_OPS_PER_TRIP.",
+      "description": "Largest trip logs currently cached in memory, merged across hubs. The hub only exports per-trip series for the busiest SIANO_METRICS_TOP_TRIPS trips (default 10) and only hydrated trips appear (an idle trip is evicted from the cache; its ops stay on disk) — so this lists the hot top-N, not every trip on disk. Watch against SIANO_MAX_OPS_PER_TRIP.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 9, "w": 12, "x": 0, "y": 67 },
       "id": 21,
@@ -466,6 +466,7 @@
     {
       "type": "timeseries",
       "title": "Per-trip live connections",
+      "description": "Devices connected per trip, for the busiest top-N trips the hub exports (SIANO_METRICS_TOP_TRIPS, default 10).",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 9, "w": 12, "x": 12, "y": 67 },
       "id": 22,
@@ -476,6 +477,7 @@
     {
       "type": "timeseries",
       "title": "Per-trip op append rate",
+      "description": "Append rate per trip, for the busiest top-N trips the hub exports (SIANO_METRICS_TOP_TRIPS, default 10). Fleet-wide append rate is on the Overview / Traffic panels.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 76 },
       "id": 23,

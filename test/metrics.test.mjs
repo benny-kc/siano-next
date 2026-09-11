@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import { createHub } from "../hub/server.js";
+import { Metrics, render } from "../hub/metrics.js";
 import { Clock, opId } from "../client/js/core/lamport.js";
 import * as ops from "../client/js/core/ops.js";
 
@@ -113,6 +114,34 @@ test("/metrics reports live connections and per-trip series", async (t) => {
   assert.match(r.body, new RegExp(`^siano_trip_ops_appended_total\\{trip="${trip}"\\} 2$`, "m"));
 
   ws.close();
+});
+
+test("per-trip metrics are a bounded top-N view (memory + cardinality)", () => {
+  const m = new Metrics({ topTrips: 3, maxTripSeries: 5 });
+
+  // Append to many distinct trips. The per-trip counter map must NOT grow one
+  // entry per trip forever — it stays bounded by maxTripSeries.
+  for (let i = 0; i < 50; i++) {
+    const trip = "trip-" + i;
+    for (let j = 0; j <= i % 4; j++) m.appended(trip); // 1..4 appends each
+  }
+  assert.ok(m.tripAppended.size <= 5, `tripAppended bounded (${m.tripAppended.size} <= 5)`);
+  assert.ok(m.opsAppended > 0, "the global total still counts every append");
+
+  // Render against 20 hydrated trips of distinct op counts: only the top 3 by
+  // ops get a per-trip series — the rest are represented by the totals alone.
+  const opCounts = new Map();
+  for (let i = 0; i < 20; i++) opCounts.set("trip-" + i, i); // trip-19 is biggest
+  const body = render(m, { connections: 0, rooms: new Map(), opCounts, tripsOnDisk: 20 });
+
+  const opLines = body.split("\n").filter((l) => l.startsWith("siano_trip_ops{"));
+  assert.equal(opLines.length, 3, "only the top-3 per-trip series are emitted");
+  for (const t of ["trip-19", "trip-18", "trip-17"]) {
+    assert.ok(body.includes(`siano_trip_ops{trip="${t}"}`), `${t} (a top trip) is present`);
+  }
+  assert.ok(!body.includes(`siano_trip_ops{trip="trip-1"}`), "a low-rank trip is omitted");
+  // The global totals still account for every trip's activity.
+  assert.match(body, new RegExp(`^siano_ops_appended_total ${m.opsAppended}$`, "m"));
 });
 
 test("peer metrics: link up + ops in/out on the dialer, inbound conn on the acceptor", async (t) => {
