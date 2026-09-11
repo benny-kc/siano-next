@@ -19,7 +19,16 @@
 
 /** Accumulating counters the hub bumps as it runs (gauges are sampled live). */
 export class Metrics {
-  constructor() {
+  /**
+   * @param {{topTrips?: number, maxTripSeries?: number}} [opts]
+   *   topTrips: how many per-trip series `render` emits (a top-N view; the
+   *     global totals already cover every trip). maxTripSeries: how many
+   *     per-trip append counters to retain in memory — the map used to grow one
+   *     entry per trip for the life of the process; now it's bounded and the
+   *     least-active trip is dropped when full. Kept comfortably above topTrips
+   *     so the emitted top-N is never the entry being evicted.
+   */
+  constructor(opts = {}) {
     this.startedAt = Date.now();
     this.wsOpened = 0; // WebSocket connections accepted
     this.wsClosed = 0; // …and closed
@@ -29,7 +38,11 @@ export class Metrics {
     this.opsAppended = 0; // ops accepted into a log (new, fanned out)
     this.opsRejected = 0; // ops refused: duplicate or hit a cap
     this.upgradeRejected = new Map(); // reason -> count (Origin, cap, bad request…)
-    this.tripAppended = new Map(); // trip -> ops appended (per-trip counter)
+    this.topTrips = Math.max(0, opts.topTrips ?? 10); // per-trip series to emit
+    // Retain a bit more than we emit so the top-N is stable, but bound it hard —
+    // this is the map that used to leak (unbounded, one per trip, forever).
+    this.maxTripSeries = Math.max(this.topTrips, opts.maxTripSeries ?? 100);
+    this.tripAppended = new Map(); // trip -> ops appended (bounded per-trip counter)
     // Hub-to-hub (peer) sync — the dialer side counters, keyed by peer URL, plus
     // the acceptor-side auth-failure count. Link up/down is sampled live (gauges).
     this.peerConnects = new Map(); // peer url -> successful dials
@@ -46,7 +59,24 @@ export class Metrics {
   /** One op accepted into `trip`'s log. */
   appended(trip) {
     this.opsAppended += 1;
-    this.tripAppended.set(trip, (this.tripAppended.get(trip) || 0) + 1);
+    const prev = this.tripAppended.get(trip);
+    // A brand-new trip that would push the map past its cap evicts the current
+    // least-active trip first. Because the cap is kept well above the emitted
+    // top-N (see render), the dropped entry is never one the top-N would show —
+    // so this bounds memory + scrape cardinality without losing the busy trips.
+    if (prev === undefined && this.tripAppended.size >= this.maxTripSeries) {
+      this._evictSmallestTrip();
+    }
+    this.tripAppended.set(trip, (prev || 0) + 1);
+  }
+
+  // Drop the least-active tracked trip, keeping the per-trip counter map bounded.
+  _evictSmallestTrip() {
+    let minTrip, minN = Infinity;
+    for (const [trip, n] of this.tripAppended) {
+      if (n < minN) { minN = n; minTrip = trip; }
+    }
+    if (minTrip !== undefined) this.tripAppended.delete(minTrip);
   }
 
   /** `n` ops refused (duplicate or capped). */
@@ -77,10 +107,12 @@ const esc = (v) =>
 
 /**
  * Render the Prometheus text exposition for a scrape.
- * @param {Metrics} m accumulated counters
+ * @param {Metrics} m accumulated counters (also carries `topTrips` — how many
+ *   per-trip series to emit)
  * @param {{connections:number, rooms:Map<string,Set>, opCounts:Map<string,number>, tripsOnDisk:number}} live
  *   sampled hub state: live socket count, trip -> connected devices, trip -> ops
- *   held in memory, and the on-disk trip-file count.
+ *   held in memory, and the on-disk trip-file count. Per-trip series are emitted
+ *   only for the top `m.topTrips` trips by op count — the totals cover the rest.
  */
 export function render(m, live) {
   const rooms = live.rooms || new Map();
@@ -160,20 +192,28 @@ export function render(m, live) {
   peerCounter("siano_peer_ops_out_total", "Ops forwarded to a peer hub.", m.peerOpsOut);
   emit("siano_peer_auth_failures_total", "counter", "Inbound peer connections rejected for a bad token.", one(m.peerAuthFailures));
 
-  // Per-trip series. The set of trips is the union of those with live rooms,
-  // those loaded in memory, and those we've appended to this run.
-  const trips = new Set([...rooms.keys(), ...opCounts.keys(), ...m.tripAppended.keys()]);
-  if (trips.size) {
+  // Per-trip series — a bounded TOP-N view, NOT one series per trip. Emitting a
+  // series for every trip the hub ever served grew the scrape (and the
+  // downstream Prometheus cardinality) without limit; the global totals above
+  // already account for every trip, so per-trip is just the drill-down for the
+  // few that matter. Rank the trips currently hydrated in memory by op count and
+  // keep the busiest `topTrips` (default 10). Ties break by trip id so the set
+  // is deterministic between scrapes.
+  const topN = m.topTrips ?? 10;
+  const ranked = topN > 0
+    ? [...opCounts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, topN)
+    : [];
+  if (ranked.length) {
     const conn = [], ops = [], appended = [];
-    for (const trip of trips) {
+    for (const [trip, opCount] of ranked) {
       const lbl = `{trip="${esc(trip)}"}`;
       conn.push([lbl, rooms.get(trip)?.size || 0]);
-      ops.push([lbl, opCounts.get(trip) || 0]);
+      ops.push([lbl, opCount]);
       appended.push([lbl, m.tripAppended.get(trip) || 0]);
     }
-    emit("siano_trip_connections", "gauge", "Live device connections for a trip.", conn);
-    emit("siano_trip_ops", "gauge", "Ops held in memory for a trip.", ops);
-    emit("siano_trip_ops_appended_total", "counter", "Ops appended for a trip since start.", appended);
+    emit("siano_trip_connections", "gauge", "Live device connections (top trips by ops).", conn);
+    emit("siano_trip_ops", "gauge", "Ops held in memory (top trips by ops).", ops);
+    emit("siano_trip_ops_appended_total", "counter", "Ops appended since start (top trips by ops).", appended);
   }
 
   return L.join("\n") + "\n";

@@ -473,7 +473,11 @@ export function createHub(opts = {}) {
 
   // Prometheus metrics: a bearer token gates GET /metrics; empty ⇒ endpoint off.
   const metricsToken = opts.metricsToken ?? process.env.SIANO_METRICS_TOKEN ?? "";
-  const metrics = new Metrics();
+  // Per-trip metrics are a top-N view (default 10): the totals cover every trip,
+  // so there's no need to emit — or retain a lifetime counter for — a series per
+  // trip the hub ever served (that grew memory + Prometheus cardinality without
+  // bound). SIANO_METRICS_TOP_TRIPS tunes how many trips the drill-down shows.
+  const metrics = new Metrics({ topTrips: num(process.env.SIANO_METRICS_TOP_TRIPS, 10) });
   // Late-bound context handed to the static handler; `render` is wired once the
   // live state (wss/rooms/logs) below exists.
   const metricsCtx = { token: metricsToken, render: null };
