@@ -90,6 +90,54 @@ test("hub relays ops between devices and delta-syncs a late joiner", async (t) =
   wsC.close();
 });
 
+test("hub releases a trip's op cache after its last device disconnects", async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "siano-hub-"));
+  const hub = createHub({ dataDir });
+  const { httpServer, logs } = hub;
+  const port = await listen(httpServer);
+  t.after(async () => {
+    await hub.shutdown();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const waitFor = async (pred, ms = 2000) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (pred()) return true;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return pred();
+  };
+
+  const url = `ws://127.0.0.1:${port}`;
+  const A = new Clock("A");
+  const trip = "trip-evict-e2e";
+
+  const wsA = await open(url);
+  wsA.send(JSON.stringify({ t: "hello", trip, have: [] }));
+  await next(wsA, (m) => m.t === "sync");
+  wsA.send(JSON.stringify({ t: "op", op: ops.setTripName(A, "Rome") }));
+
+  // The hub hydrates the trip and holds its op once it appends it. (mem.has()
+  // alone would be true from the empty map `hello` created — wait for the op.)
+  assert.ok(
+    await waitFor(() => logs.mem.has(trip) && logs.all(trip).length === 1),
+    "trip is hydrated with its op while a device is connected",
+  );
+
+  // When the last device leaves, the trip's op cache is released from memory…
+  wsA.close();
+  assert.ok(await waitFor(() => !logs.mem.has(trip)), "trip cache is released after the last device disconnects");
+
+  // …but nothing is lost: a fresh joiner is still handed the op from disk.
+  const wsB = await open(url);
+  wsB.send(JSON.stringify({ t: "hello", trip, have: [] }));
+  const sync = await next(wsB, (m) => m.t === "sync");
+  assert.equal(sync.ops.length, 1, "the evicted-then-reloaded trip still delivers its ops");
+  assert.equal(sync.ops[0].op, "set_trip_name");
+  wsB.close();
+});
+
 test("hub pulls a reconnecting device's offline-made ops back up (want)", async (t) => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "siano-hub-"));
   const hub = createHub({ dataDir });

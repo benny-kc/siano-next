@@ -105,6 +105,8 @@ test("/metrics reports live connections and per-trip series", async (t) => {
   // Global gauges/counters.
   assert.match(r.body, /^siano_ws_connections 1$/m);
   assert.match(r.body, /^siano_ops_appended_total 2$/m);
+  // The trip is hydrated while its device is connected → cached in memory.
+  assert.match(r.body, /^siano_trips_in_memory 1$/m);
   // Per-trip series carry the trip label.
   assert.match(r.body, new RegExp(`^siano_trip_connections\\{trip="${trip}"\\} 1$`, "m"));
   assert.match(r.body, new RegExp(`^siano_trip_ops\\{trip="${trip}"\\} 2$`, "m"));

@@ -120,7 +120,7 @@
   "timezone": "",
   "title": "Siano Hub",
   "uid": "siano-hub",
-  "version": 5,
+  "version": 6,
   "weekStart": "",
   "panels": [
     {
@@ -183,6 +183,17 @@
       "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(rate(siano_ops_appended_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"}[$__rate_interval]))", "instant": true, "legendFormat": "ops/s" } ],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "value" },
       "fieldConfig": { "defaults": { "unit": "ops", "decimals": 2, "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Trips in memory (fleet)",
+      "description": "Trips whose op log is currently cached in RAM (siano_trips_in_memory), summed across hubs. Bounded by SIANO_MAX_TRIPS_IN_MEMORY (default 256) and released when a trip's last device disconnects, so it stays low even as 'Trips on disk' climbs. If it tracks the on-disk total instead, the op cache isn't being released (the pre-fix behaviour).",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "id": 35,
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum(siano_trips_in_memory{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "instant": true, "legendFormat": "in memory" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "value" },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "super-light-blue" } }, "overrides": [] }
     },
 
     {
@@ -440,7 +451,7 @@
     {
       "type": "table",
       "title": "Top trips by ops",
-      "description": "Largest trip logs in memory, merged across hubs. Watch against SIANO_MAX_OPS_PER_TRIP.",
+      "description": "Largest trip logs currently cached in memory, merged across hubs. Only hydrated trips appear here — an idle trip is evicted from the cache (its ops stay on disk), so this lists hot trips, not every trip on disk. Watch against SIANO_MAX_OPS_PER_TRIP.",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "h": 9, "w": 12, "x": 0, "y": 67 },
       "id": 21,
@@ -484,9 +495,9 @@
     {
       "type": "timeseries",
       "title": "Node process memory per hub (RSS & V8 heap)",
-      "description": "The hub process itself (siano_process_*), distinct from whole-host memory above.",
+      "description": "The hub process itself (siano_process_*), distinct from whole-host memory above. After a burst of trips + a drain, RSS should stop climbing and level off — bounded by the in-memory op-cache cap (see the panel to the right).",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 85 },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 85 },
       "id": 25,
       "targets": [
         { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (siano_process_resident_memory_bytes{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "legendFormat": "{{hub}} rss" },
@@ -494,6 +505,20 @@
       ],
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 8, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } }, "overrides": [ { "matcher": { "id": "byRegexp", "options": ".*heap" }, "properties": [ { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } } ] } ] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Trip op-cache: in memory vs on disk per hub",
+      "description": "siano_trips_in_memory (op logs hydrated in RAM) against siano_trips_total (trip files on disk). The in-memory line should plateau at/under SIANO_MAX_TRIPS_IN_MEMORY (default 256) and fall back after a burst as idle trips are evicted, while the on-disk line only grows. A memory line that climbs in lockstep with disk means the op cache isn't being released — the pre-fix leak that pinned every trip's ops in the heap.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 85 },
+      "id": 46,
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (siano_trips_in_memory{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "legendFormat": "{{hub}} in memory" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "max by (hub) (siano_trips_total{job=~\"$job\", instance=~\"$instance\", hub=~\"$hub\"})", "legendFormat": "{{hub}} on disk" }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 8, "showPoints": "never", "lineWidth": 2 }, "color": { "mode": "palette-classic" } }, "overrides": [ { "matcher": { "id": "byRegexp", "options": ".*on disk" }, "properties": [ { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } } ] } ] }
     },
 
     {

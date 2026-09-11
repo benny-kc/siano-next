@@ -38,10 +38,14 @@ test("loadsim drives ops through the hub and measures relay latency", async (t) 
   assert.equal(stats.connections.opened, 6, "all leaf connections opened");
   assert.equal(stats.connections.failed, 0);
 
-  // Ops flowed and were durably appended.
+  // Ops flowed and were durably appended. Count from DISK (the source of truth),
+  // not the in-memory cache: idle trips are evicted from memory once their last
+  // device disconnects (the load sim drains connections at the end), so
+  // opCounts() legitimately drops them — durability lives in the JSONL.
   assert.ok(stats.ops.emitted > 0, "emitted some ops");
+  await hub.logs.flush();
   let onDisk = 0;
-  for (const n of hub.logs.opCounts().values()) onDisk += n;
+  for (const trip of hub.logs.trips()) onDisk += hub.logs.all(trip).length;
   assert.ok(onDisk > 0, "hub durably appended ops");
 
   // The other device on each trip received relays → relay latency was measured.

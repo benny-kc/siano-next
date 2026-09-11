@@ -106,6 +106,11 @@ export function render(m, live) {
   emit("siano_trips_active", "gauge", "Trips with at least one live connection.",
     one(rooms.size));
   emit("siano_trips_total", "gauge", "Trip logs on disk.", one(live.tripsOnDisk || 0));
+  // Trips whose op index is currently hydrated in the heap — the number the
+  // in-memory (LRU + evict-on-idle) cap keeps bounded. Watch it to confirm memory
+  // falls back after a burst of trips instead of climbing with the on-disk total.
+  emit("siano_trips_in_memory", "gauge", "Trips whose op log is currently held in memory.",
+    one(opCounts.size));
 
   // Lifetime counters.
   emit("siano_ws_opened_total", "counter", "WebSocket connections accepted.", one(m.wsOpened));

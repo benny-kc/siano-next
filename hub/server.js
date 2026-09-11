@@ -481,6 +481,12 @@ export function createHub(opts = {}) {
   const logs = new TripLogs(path.join(dataDir, "logs"), {
     maxOpsPerTrip: opts.maxOpsPerTrip ?? num(process.env.SIANO_MAX_OPS_PER_TRIP, 0),
     maxTrips: opts.maxTrips ?? num(process.env.SIANO_MAX_TRIPS, 0),
+    // LRU cap on trips kept hydrated in memory. A finite default so a burst of
+    // trips (a load test, an abusive client) can never pin every trip's op set
+    // in the heap; idle trips are also released the moment their last device
+    // leaves (see `leave` below). 0 = unlimited. Everything stays on disk, so a
+    // dropped trip just re-reads on its next access.
+    maxTripsInMemory: opts.maxTripsInMemory ?? num(process.env.SIANO_MAX_TRIPS_IN_MEMORY, 256),
   });
 
   const isValidTripId = tripIdValidator(tripIdMax);
@@ -524,7 +530,14 @@ export function createHub(opts = {}) {
     const room = conn.trip && rooms.get(conn.trip);
     if (!room) return;
     room.delete(conn);
-    if (room.size === 0) rooms.delete(conn.trip);
+    if (room.size === 0) {
+      rooms.delete(conn.trip);
+      // No device left on this trip — release its cached op index. The log stays
+      // durable on disk and re-hydrates on the next hello, so this bounds hub
+      // memory to the trips actually in use: a load test's trips fall out of the
+      // heap once their sockets close, instead of lingering for the process life.
+      logs.evict(conn.trip);
+    }
   };
   const fanout = (trip, obj, except) => {
     const room = rooms.get(trip);
@@ -734,7 +747,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
       ` conns=${num(process.env.SIANO_MAX_CONNECTIONS, 500)}` +
       ` rate=${num(process.env.SIANO_MAX_MSGS_PER_SEC, 50)}/s` +
       ` ops/trip=${num(process.env.SIANO_MAX_OPS_PER_TRIP, 0) || "∞"}` +
-      ` trips=${num(process.env.SIANO_MAX_TRIPS, 0) || "∞"}`);
+      ` trips=${num(process.env.SIANO_MAX_TRIPS, 0) || "∞"}` +
+      ` mem-trips=${num(process.env.SIANO_MAX_TRIPS_IN_MEMORY, 256) || "∞"}`);
     log(`  origins    : ${process.env.SIANO_ALLOWED_ORIGINS || "(any — allowlist off)"}`);
     log(`  peer sync  : ${process.env.SIANO_PEER_URL ? `always-on link → ${process.env.SIANO_PEER_URL}` : "passive (accepts inbound peer links; set SIANO_PEER_URL=wss://other-hub to dial one)"}` +
       `${process.env.SIANO_PEER_URL || process.env.SIANO_PEER_TOKEN ? (process.env.SIANO_PEER_TOKEN ? " (token set)" : " ⚠ NO SIANO_PEER_TOKEN — set it on both hubs") : ""}`);

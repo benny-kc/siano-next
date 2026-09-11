@@ -156,7 +156,7 @@ Create ops via the `ops.js` constructors (they stamp the clock). Emit them throu
 | Path | What |
 |---|---|
 | `hub/ws.js` | RFC 6455 WebSocket server: handshake + framing, bounded frames, masking/reserved/control-frame checks, `ping()`/`terminate()`, `"reject"` events. |
-| `hub/log.js` | `TripLogs`: durable append-only JSONL per trip; async per-trip write queue; op/trip caps; `all`/`missing`/`flush`. |
+| `hub/log.js` | `TripLogs`: durable append-only JSONL per trip; async per-trip write queue; op/trip caps; **bounded in-memory op cache** (LRU `maxTripsInMemory` + `evict(trip)` release-on-idle, so a burst of trips can't pin every op set in the heap for the process life — disk stays the source of truth, dropped trips re-hydrate on access); `all`/`missing`/`flush`. |
 | `hub/server.js` | `createHub({...})` factory (returns `{ httpServer, wss, logs, shutdown }`) + static server (env-controlled cache headers + optional asset hashing) + relay + heartbeat + logging + graceful shutdown + the GitHub deploy webhook (`POST /webhookforgitHub`, HMAC-gated by `SIANO_GITHUB_WEBHOOK`, stops the hub for a supervisor to redeploy). Auto-starts when run directly. |
 | `hub/assets.js` | `buildAssets(clientDir)` — in-memory content-hash fingerprinting: rewrites the ESM import graph + `index.html` + service worker to `…<hash>.js` URLs (dependency-ordered; throws on an import cycle). Enabled by `SIANO_ASSET_HASHING`. |
 | `hub/metrics.js` | `Metrics` (lifetime counters the hub bumps) + `render(metrics, live)` — Prometheus text exposition served at `GET /metrics`. **Token-gated (`SIANO_METRICS_TOKEN`), off (404) when unset** — series leak trip ids/volume. Covers client traffic, per-trip series, process, AND the **peer link** (`siano_peer_*`: link up/down, ops in/out, reconnects, inbound conns, auth failures). Dependency-free; scrape it with Grafana Alloy/Agent → Grafana Cloud (see docs/security.md → *Metrics / monitoring*). NB the peer counter Map fields (`peerOpsIn`/`peerOpsOut`) and the record methods (`peerRecvOps`/`peerSentOps`) are deliberately named differently — a same-named instance field would shadow the prototype method. |
@@ -215,11 +215,20 @@ Full detail in **docs/security.md**. Key points:
   per-trip op cap + global trip cap, trip-id validation, GET/HEAD-only static +
   path-traversal check, tight CSP + security headers, optional Origin allowlist,
   HTTP timeouts, graceful shutdown.
+- **Bounded in-memory op cache** (`log.js`): a touched trip's ops are cached so
+  reads/appends don't re-parse the file, but that cache is bounded — an LRU cap
+  (`SIANO_MAX_TRIPS_IN_MEMORY`, default 256) plus release-on-idle (a trip is
+  dropped from memory when its last device disconnects). Before this, every trip
+  ever served stayed hydrated for the life of the process, so a burst of trips (a
+  load test, an abusive client) pinned their whole op set in the heap forever and
+  RSS never came back down after everyone disconnected. The append-only JSONL on
+  disk is the source of truth; a dropped trip re-reads on its next access. Watch
+  `siano_trips_in_memory` in `/metrics` to confirm it falls back after a burst.
 
 ### Environment variables
 `HOST`, `PORT`, `SIANO_DATA_DIR`, `SIANO_MAX_MSG_BYTES`, `SIANO_MAX_CONNECTIONS`,
 `SIANO_MAX_MSGS_PER_SEC`, `SIANO_ALLOWED_ORIGINS`, `SIANO_MAX_OPS_PER_TRIP`,
-`SIANO_MAX_TRIPS`, `SIANO_HEARTBEAT_MS`, `SIANO_TRIP_ID_MAX`, `SIANO_PEER_URL`,
+`SIANO_MAX_TRIPS`, `SIANO_MAX_TRIPS_IN_MEMORY`, `SIANO_HEARTBEAT_MS`, `SIANO_TRIP_ID_MAX`, `SIANO_PEER_URL`,
 `SIANO_PEER_TOKEN`, `SIANO_PEER_MAX_MSG_BYTES`, `SIANO_METRICS_TOKEN`, `SIANO_GITHUB_WEBHOOK`, `SIANO_DEBUG`, `SIANO_CLIENT_DEBUG`,
 `SIANO_ASSET_HASHING`, `SIANO_CACHE_CONTROL`, `SIANO_CDN_CACHE_CONTROL`,
 `SIANO_SW_CACHE_CONTROL`, `SIANO_FORCE_HTTPS`.
