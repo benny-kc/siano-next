@@ -32,7 +32,8 @@ import zh from "./zh.js";
 import ja from "./ja.js";
 import ko from "./ko.js";
 import ar from "./ar.js";
-registerVersion("js/i18n/index.js", 1);
+import pl from "./pl.js";
+registerVersion("js/i18n/index.js", 2);
 
 export const DEFAULT_LOCALE = "en";
 
@@ -50,6 +51,7 @@ export const LOCALES = [
   { code: "ja", label: "Japanese", endonym: "日本語", dir: "ltr" },
   { code: "ko", label: "Korean", endonym: "한국어", dir: "ltr" },
   { code: "ar", label: "Arabic", endonym: "العربية", dir: "rtl" },
+  { code: "pl", label: "Polish", endonym: "Polski", dir: "ltr" },
 ];
 
-export const CATALOGS = { en, es, fr, de, it, pt, zh, ja, ko, ar };
+export const CATALOGS = { en, es, fr, de, it, pt, zh, ja, ko, ar, pl };

@@ -22,8 +22,10 @@ export default {
   "common.untitledTrip": "Untitled trip",
 
   // ── Top bar ───────────────────────────────────────────────────────────────────
-  "topbar.bill": "bill",
-  "topbar.bills": "bills",
+  // The count and the word are separate DOM nodes ("3" + "bills"); the word is a
+  // function of the count so languages with more than two plural forms (e.g.
+  // Polish: rachunek / rachunki / rachunków) render the right one.
+  "topbar.billWord": ({ n }) => (n === 1 ? "bill" : "bills"),
   "topbar.live": "live",
   "topbar.offline": "offline",
 

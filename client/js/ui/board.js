@@ -28,7 +28,7 @@ import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { t, activeLocale, localePref, LOCALES } from "./i18n.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 14);
+registerVersion("js/ui/board.js", 15);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -1044,7 +1044,7 @@ export async function downloadReportCsv(snap) {
 function renderTopBar(snap) {
   document.getElementById("trip-chip").textContent = snap.name || t("common.untitledTrip");
   document.getElementById("bill-count").textContent = String(snap.billCount);
-  document.getElementById("bill-word").textContent = snap.billCount === 1 ? t("topbar.bill") : t("topbar.bills");
+  document.getElementById("bill-word").textContent = t("topbar.billWord", { n: snap.billCount });
   document.getElementById("total").textContent = format(snap.totalCents);
   document.title = snap.name ? `${snap.name} · Siano` : "Siano";
 }
