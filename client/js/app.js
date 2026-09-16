@@ -28,9 +28,10 @@ import { installFullscreen, fullscreenPreferred, setFullscreenPreferred } from "
 import { initInstall, promptInstall } from "./ui/install.js";
 import { showOnboarding } from "./ui/onboarding.js";
 import { debugEnabled, setDebugEnabled } from "./ui/debug.js";
+import { applyI18n, setLocalePref, t } from "./ui/i18n.js";
 import { dlog, derror } from "./log.js";
 import { registerVersion } from "./version.js";
-registerVersion("js/app.js", 5);
+registerVersion("js/app.js", 6);
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const EMOJIS = ["🍽️", "🍕", "🍔", "🍜", "🍣", "🥘", "🍰", "🍺", "🍷", "☕", "🛒", "🚕", "🏨", "🎟️", "⛽", "🍦"];
@@ -87,6 +88,7 @@ async function main() {
 
   installViewState();
   applyTypography(); // restore this device's font/size/boldness before first paint
+  applyI18n(); // restore this device's language (and <html> lang/dir) before first paint
   installFullscreen(); // honour the per-device "always full-screen" preference
 
   let interactions; // set after init (below); openMeal needs its panToMeal
@@ -162,7 +164,7 @@ async function main() {
 
     addMember: (name) => {
       const n = log.snapshot().members.length;
-      const nm = (name && name.trim()) || `Traveller ${n + 1}`;
+      const nm = (name && name.trim()) || t("app.travellerDefault", { n: n + 1 });
       const id = uid("m-");
       log.emit((c) => ops.addMember(c, id, { name: nm, color: PALETTE[n % PALETTE.length], initials: initialsFor(nm) || "?" }));
     },
@@ -259,7 +261,7 @@ async function main() {
     pickLedger: (id) => { ui.ledgerMember = ui.ledgerMember === id ? null : id; schedulePaint(); },
 
     share: async () => {
-      try { await navigator.clipboard.writeText(location.href); toast("Trip link copied — share it to invite others"); }
+      try { await navigator.clipboard.writeText(location.href); toast(t("app.toast.linkCopied")); }
       catch { toast(location.href); }
     },
     newTrip: () => { location.assign(`/t/${uid("trip-")}`); },
@@ -268,9 +270,13 @@ async function main() {
     setFont: (id) => { setFont(id); schedulePaint(); },
     stepTextSize: (dir) => { stepScale(dir * SCALE_STEP); schedulePaint(); },
     stepWeight: (dir) => { stepWeight(dir * WEIGHT_STEP); schedulePaint(); },
-    setTheme: (t) => { setTheme(t); schedulePaint(); },
+    setTheme: (theme) => { setTheme(theme); schedulePaint(); },
     toggleFullscreen: () => { setFullscreenPreferred(!fullscreenPreferred()); schedulePaint(); },
     resetAppearance: () => { resetTypography(); schedulePaint(); },
+
+    // Per-device UI language ("auto" follows the browser). Applies to <html> +
+    // the static chrome immediately, then repaints so board strings re-read t().
+    setLocale: (pref) => { setLocalePref(pref); schedulePaint(); },
 
     // Per-device Debug toggle: shows the per-file JS version readout in Settings
     // (see ui/debug.js + ui/board.js debugSection). A client-only aid.
@@ -280,7 +286,7 @@ async function main() {
     // The section repaints itself via initInstall's hook when the state changes.
     installApp: async () => {
       const outcome = await promptInstall();
-      if (outcome === "accepted") toast("Installing Siano…");
+      if (outcome === "accepted") toast(t("app.toast.installing"));
     },
 
     // First-run hint: tapping the empty traveller dock opens Settings and blinks
@@ -304,7 +310,7 @@ async function main() {
     openTrip: (id) => { if (id && id !== tripId) location.assign(`/t/${encodeURIComponent(id)}`); },
     shareTripLink: async (id) => {
       const url = `${location.origin}/t/${encodeURIComponent(id)}`;
-      try { await navigator.clipboard.writeText(url); toast("🔗 Link copied — share it with your group."); }
+      try { await navigator.clipboard.writeText(url); toast(t("app.toast.linkCopiedGroup")); }
       catch { toast(url); }
     },
     removeTrip: (id) => { forgetTrip(id); schedulePaint(); },
@@ -396,7 +402,7 @@ async function main() {
   // Live sync (optional — the app is fully usable offline).
   const sync = new SyncClient(wsUrl(), log, {
     onStatus: (s) => {
-      netEl.textContent = s === "open" ? "live" : s === "connecting" ? "…" : "offline";
+      netEl.textContent = s === "open" ? t("topbar.live") : s === "connecting" ? "…" : t("topbar.offline");
       netEl.className = "net net--" + (s === "open" ? "open" : s === "connecting" ? "connecting" : "closed");
     },
   });
@@ -411,5 +417,5 @@ async function main() {
 main().catch((e) => {
   derror("failed to start", e);
   const b = document.getElementById("board-canvas");
-  if (b) b.textContent = "Failed to start: " + e.message;
+  if (b) b.textContent = t("app.failedStart") + e.message;
 });

@@ -17,8 +17,9 @@ import { selectedMember, setSelectedTraveller, clearSelectedTraveller } from "./
 import { makeEncoder, makeDecoder, serializeFrame, parseFrame, packOps, unpackOps } from "../core/qrstream.js";
 import { encodeText } from "../vendor/qrcode.js";
 import jsQR from "../vendor/jsqr.js";
+import { t } from "./i18n.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/interactions.js", 12);
+registerVersion("js/ui/interactions.js", 13);
 
 const EDGE = 28; // px from a screen border where an "open" swipe may start
 const DRAG_THRESH = 8; // px of travel before a token press becomes a drag
@@ -131,8 +132,10 @@ function wireOfflineSyncSim(actions) {
   const sendingNote = modal.querySelector(".osync-sending-note");
   const qrBox = modal.querySelector(".osync-qr");
   const qrIdle = qrBox ? qrBox.innerHTML : null; // "QR code / camera will appear here"
-  const sendLabel = sendBtn && sendBtn.textContent; // "Start sending"
-  const recvLabel = recvBtn && recvBtn.textContent; // "Start receiving"
+  // Idle button labels via t() so they follow the active language even if it
+  // changed after this wiring ran (the static markup is localized separately).
+  const sendLabel = () => t("osync.startSending");
+  const recvLabel = () => t("osync.startReceiving");
 
   const restorePlaceholder = () => { if (qrBox && qrIdle != null) qrBox.innerHTML = qrIdle; };
   const boxNote = (text) => {
@@ -193,8 +196,8 @@ function wireOfflineSyncSim(actions) {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
     } catch {
-      boxNote("Camera unavailable — allow camera access, then tap Start receiving again.");
-      if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel; }
+      boxNote(t("osync.cameraError"));
+      if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel(); }
       return;
     }
     // Bailed out (overlay closed) while the permission prompt was up.
@@ -223,22 +226,22 @@ function wireOfflineSyncSim(actions) {
       try { env = await unpackOps(packed); } catch { env = null; }
       const res = env && actions && actions.receiveTrip ? await actions.receiveTrip(env) : null;
       if (!res || res.error) {
-        if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel; }
-        boxNote("Couldn't read the transfer — try again.");
+        if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel(); }
+        boxNote(t("osync.readError"));
         return;
       }
-      if (recvBtn) { recvBtn.style.backgroundSize = "100% 100%"; recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = "Received ✓"; }
+      if (recvBtn) { recvBtn.style.backgroundSize = "100% 100%"; recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = t("osync.received"); }
       if (res.sameTrip) {
         const n = res.added;
-        boxNote(n ? `Received ${n} new ${n === 1 ? "op" : "ops"} 🎉` : "Already up to date — nothing new 🎉");
+        boxNote(n ? t("osync.receivedOps", { n }) : t("osync.upToDate"));
         // Auto-close the overlay a few seconds after a successful receive.
         setTimeout(() => { if (View.offlineSyncOpen()) View.closeOfflineSync(); }, 4000);
         return;
       }
       // A different trip: it's been created on this device — open it.
       const bills = res.billCount;
-      const label = res.name ? `“${res.name}”` : "a new trip";
-      boxNote(`Received ${label} — ${bills} ${bills === 1 ? "bill" : "bills"}. Opening…`);
+      const label = res.name ? `“${res.name}”` : t("osync.aNewTrip");
+      boxNote(t("osync.receivedTrip", { label, n: bills }));
       setTimeout(() => { window.location.assign(res.url); }, 1400);
     };
 
@@ -278,9 +281,9 @@ function wireOfflineSyncSim(actions) {
   if (sendBtn) sendBtn.addEventListener("click", () => {
     sendBtn.classList.add("is-sending");
     sendBtn.setAttribute("aria-busy", "true");
-    sendBtn.textContent = "Sending…";
+    sendBtn.textContent = t("osync.sending");
     if (sendingNote) sendingNote.classList.remove("hidden");
-    if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel; }
+    if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel(); }
     startStream();
   });
   if (recvBtn) recvBtn.addEventListener("click", () => {
@@ -288,8 +291,8 @@ function wireOfflineSyncSim(actions) {
     void recvBtn.offsetWidth;
     recvBtn.classList.add("is-receiving");
     recvBtn.setAttribute("aria-busy", "true");
-    recvBtn.textContent = "Receiving…";
-    if (sendBtn) { sendBtn.classList.remove("is-sending"); sendBtn.removeAttribute("aria-busy"); sendBtn.textContent = sendLabel; }
+    recvBtn.textContent = t("osync.receiving");
+    if (sendBtn) { sendBtn.classList.remove("is-sending"); sendBtn.removeAttribute("aria-busy"); sendBtn.textContent = sendLabel(); }
     if (sendingNote) sendingNote.classList.add("hidden");
     startReceive();
   });
@@ -299,8 +302,8 @@ function wireOfflineSyncSim(actions) {
     stopStream();
     stopReceive();
     restorePlaceholder();
-    if (sendBtn) { sendBtn.classList.remove("is-sending"); sendBtn.removeAttribute("aria-busy"); sendBtn.textContent = sendLabel; }
-    if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel; }
+    if (sendBtn) { sendBtn.classList.remove("is-sending"); sendBtn.removeAttribute("aria-busy"); sendBtn.textContent = sendLabel(); }
+    if (recvBtn) { recvBtn.classList.remove("is-receiving"); recvBtn.removeAttribute("aria-busy"); recvBtn.textContent = recvLabel(); }
     if (sendingNote) sendingNote.classList.add("hidden");
   }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-siano-offlinesync"] });
 }
@@ -315,7 +318,7 @@ function wireConfirm(actions) {
   const backdrop = modal.querySelector(".confirm-backdrop");
   let pending = null;
 
-  const open = (message, fn) => { pending = fn; msgEl.textContent = message || "Are you sure?"; modal.classList.remove("hidden"); requestAnimationFrame(() => modal.style.opacity = "1"); };
+  const open = (message, fn) => { pending = fn; msgEl.textContent = message || t("confirm.default"); modal.classList.remove("hidden"); requestAnimationFrame(() => modal.style.opacity = "1"); };
   const close = () => { pending = null; modal.style.opacity = "0"; setTimeout(() => modal.classList.add("hidden"), 200); };
 
   document.addEventListener("click", (e) => {

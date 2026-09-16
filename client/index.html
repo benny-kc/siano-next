@@ -222,6 +222,18 @@
     <link rel="modulepreload" href="/js/sync/client.js" />
     <link rel="modulepreload" href="/js/vendor/qrcode.js" />
     <link rel="modulepreload" href="/js/vendor/jsqr.js" />
+    <link rel="modulepreload" href="/js/i18n/en.js" />
+    <link rel="modulepreload" href="/js/i18n/es.js" />
+    <link rel="modulepreload" href="/js/i18n/fr.js" />
+    <link rel="modulepreload" href="/js/i18n/de.js" />
+    <link rel="modulepreload" href="/js/i18n/it.js" />
+    <link rel="modulepreload" href="/js/i18n/pt.js" />
+    <link rel="modulepreload" href="/js/i18n/zh.js" />
+    <link rel="modulepreload" href="/js/i18n/ja.js" />
+    <link rel="modulepreload" href="/js/i18n/ko.js" />
+    <link rel="modulepreload" href="/js/i18n/ar.js" />
+    <link rel="modulepreload" href="/js/i18n/index.js" />
+    <link rel="modulepreload" href="/js/ui/i18n.js" />
     <link rel="modulepreload" href="/js/ui/selection.js" />
     <link rel="modulepreload" href="/js/ui/typography.js" />
     <link rel="modulepreload" href="/js/ui/fullscreen.js" />
@@ -264,7 +276,7 @@
     <div id="trip">
       <!-- ─────────── Top bar (a left column in landscape) ─────────── -->
       <header class="topbar">
-        <div class="topbar-summary" data-siano-open="bills" role="button" title="Bills history">
+        <div class="topbar-summary" data-siano-open="bills" role="button" title="Bills history" data-i18n-attr="title:topbar.billsHistory">
           <div class="topbar-row">
             <div class="topbar-title">
               <span class="bag">🧳</span>
@@ -276,22 +288,22 @@
             <span class="count"><b id="bill-count">0</b> <span id="bill-word">bills</span></span>
             <span class="dot">·</span>
             <span id="total" class="total">0.00</span>
-            <span id="net" class="net net--closed" title="sync status">offline</span>
+            <span id="net" class="net net--closed" title="sync status" data-i18n-attr="title:topbar.syncStatus">offline</span>
           </div>
         </div>
 
         <div class="topbar-actions">
-          <button class="icon-btn" data-siano-open="bills" title="Bills history" aria-label="Bills history">
+          <button class="icon-btn" data-siano-open="bills" title="Bills history" aria-label="Bills history" data-i18n-attr="title:topbar.billsHistory;aria-label:topbar.billsHistory">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" d="M4 7h16M4 12h16M4 17h10" />
             </svg>
           </button>
-          <button id="add-meal" class="icon-btn icon-btn--primary" title="Add meal" aria-label="Add meal">
+          <button id="add-meal" class="icon-btn icon-btn--primary" title="Add meal" aria-label="Add meal" data-i18n-attr="title:topbar.addMeal;aria-label:topbar.addMeal">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <path stroke-linecap="round" d="M12 5v14M5 12h14" />
             </svg>
           </button>
-          <button class="icon-btn" data-siano-open="menu" title="Settings" aria-label="Open settings">
+          <button class="icon-btn" data-siano-open="menu" title="Settings" aria-label="Open settings" data-i18n-attr="title:topbar.settings;aria-label:topbar.openSettings">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="3.2" />
               <path
@@ -307,11 +319,11 @@
       <!-- ─────────── The game board (meals) ─────────── -->
       <main id="board-surface" class="board-surface">
         <p id="board-empty" class="board-empty hidden">
-          <span
+          <span data-i18n-html="board.emptyMain"
             ><span class="shine">Drag a traveller up here</span> to start a meal —
             or tap ➕. Then drop the others onto it to split the bill 🍽️</span
           >
-          <span class="sub">one finger to pan · two fingers / pinch to zoom</span>
+          <span class="sub" data-i18n="board.emptySub">one finger to pan · two fingers / pinch to zoom</span>
         </p>
         <!-- Meal cards are rendered here, positioned in canvas coordinates. -->
         <div id="board-canvas"></div>
@@ -320,12 +332,12 @@
       <!-- ─────────── Traveller dock (always ready to drag) ─────────── -->
       <footer class="dock-wrap">
         <div class="dock-head">
-          <span class="lbl">Travellers</span>
+          <span class="lbl" data-i18n="dock.travellers">Travellers</span>
           <!-- Transient "+ add all" shortcut, centred between the label and the
                tip. Briefly appears after a meal is created by dragging; empty =
                collapsed (see .quick-actions:empty). Painted by board.js. -->
           <div id="quick-actions" class="quick-actions"></div>
-          <span class="tip">drag onto a meal ↑</span>
+          <span class="tip" data-i18n="dock.tip">drag onto a meal ↑</span>
         </div>
         <div id="dock" class="dock"></div>
       </footer>
@@ -335,12 +347,12 @@
     <div id="bills-backdrop" class="backdrop" data-siano-close></div>
     <aside id="bills" class="drawer drawer--bills">
       <div class="drawer-head">
-        <h2>🧾 Bills</h2>
+        <h2 data-i18n="bills.drawerTitle">🧾 Bills</h2>
         <div class="tools">
-          <button class="round-btn osync-open-btn" data-siano-offlinesync-open aria-label="Sync offline">
-            <span class="osync-open-lbl">sync<br>offline</span>
+          <button class="round-btn osync-open-btn" data-siano-offlinesync-open aria-label="Sync offline" data-i18n-attr="aria-label:bills.syncOfflineAria">
+            <span class="osync-open-lbl" data-i18n-html="bills.syncOfflineLbl">sync<br>offline</span>
           </button>
-          <button id="bills-report-btn" class="round-btn" data-siano-report-open aria-label="Report">
+          <button id="bills-report-btn" class="round-btn" data-siano-report-open aria-label="Report" data-i18n-attr="aria-label:bills.reportAria">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke="currentColor">
               <path
                 stroke-linecap="round"
@@ -349,7 +361,7 @@
               />
             </svg>
           </button>
-          <button id="bills-sort-btn" class="round-btn" data-siano-sortmenu aria-label="Sort bills" aria-expanded="false">
+          <button id="bills-sort-btn" class="round-btn" data-siano-sortmenu aria-label="Sort bills" aria-expanded="false" data-i18n-attr="aria-label:bills.sortAria">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke="currentColor">
               <path
                 stroke-linecap="round"
@@ -358,11 +370,11 @@
               />
             </svg>
           </button>
-          <button class="round-btn" data-siano-close aria-label="Close bills">✕</button>
+          <button class="round-btn" data-siano-close aria-label="Close bills" data-i18n-attr="aria-label:bills.closeAria">✕</button>
         </div>
       </div>
       <div id="bills-sort-menu" class="sort-menu"></div>
-      <p class="muted-note">Tap a bill to open it on the board and edit it.</p>
+      <p class="muted-note" data-i18n="bills.tapHint">Tap a bill to open it on the board and edit it.</p>
       <div id="bills-content"></div>
     </aside>
 
@@ -370,8 +382,8 @@
     <div id="menu-backdrop" class="backdrop" data-siano-close></div>
     <aside id="menu" class="drawer drawer--menu">
       <div class="drawer-head">
-        <h2>⚙️ Settings</h2>
-        <button class="round-btn" data-siano-close aria-label="Close settings">✕</button>
+        <h2 data-i18n="menu.drawerTitle">⚙️ Settings</h2>
+        <button class="round-btn" data-siano-close aria-label="Close settings" data-i18n-attr="aria-label:menu.closeAria">✕</button>
       </div>
       <div id="menu-content"></div>
     </aside>
@@ -380,10 +392,10 @@
     <div id="report-backdrop" class="backdrop" data-siano-report-close></div>
     <aside id="report" class="drawer drawer--report">
       <div class="drawer-head">
-        <h2>📊 Report</h2>
+        <h2 data-i18n="report.drawerTitle">📊 Report</h2>
         <div class="tools">
-          <button id="report-csv" class="csv-btn" type="button" title="Download CSV backup">⬇ CSV</button>
-          <button class="round-btn" data-siano-report-close aria-label="Close report">✕</button>
+          <button id="report-csv" class="csv-btn" type="button" title="Download CSV backup" data-i18n="report.csvButton" data-i18n-attr="title:report.csvTitle">⬇ CSV</button>
+          <button class="round-btn" data-siano-report-close aria-label="Close report" data-i18n-attr="aria-label:report.closeAria">✕</button>
         </div>
       </div>
       <div id="report-content" class="report-body"></div>
@@ -394,58 +406,58 @@
       <div class="confirm-backdrop" data-siano-help-close></div>
       <div class="help-panel">
         <div class="help-head">
-          <h2>❓ How to use Siano</h2>
-          <button class="round-btn" data-siano-help-close aria-label="Close help">✕</button>
+          <h2 data-i18n="help.title">❓ How to use Siano</h2>
+          <button class="round-btn" data-siano-help-close aria-label="Close help" data-i18n-attr="aria-label:help.closeAria">✕</button>
         </div>
         <div class="help-body">
-          <p>
+          <p data-i18n-html="help.intro">
             Siano splits a group trip's bills. Everyone who opens the trip's link sees the
             <b>same live board</b> — share it from ⚙️ Settings.
           </p>
           <section>
-            <h3>🧑‍🤝‍🧑 Travellers</h3>
+            <h3 data-i18n="help.travellers.title">🧑‍🤝‍🧑 Travellers</h3>
             <ul>
-              <li>Add or remove travellers in <b>⚙️ Settings</b>.</li>
-              <li><b>Drag</b> a traveller onto a meal card to add them to that bill.</li>
-              <li>Drag one onto <b>empty board space</b> to start a new meal with them.</li>
+              <li data-i18n-html="help.travellers.1">Add or remove travellers in <b>⚙️ Settings</b>.</li>
+              <li data-i18n-html="help.travellers.2"><b>Drag</b> a traveller onto a meal card to add them to that bill.</li>
+              <li data-i18n-html="help.travellers.3">Drag one onto <b>empty board space</b> to start a new meal with them.</li>
             </ul>
           </section>
           <section>
-            <h3>🍽️ Meals &amp; bills</h3>
+            <h3 data-i18n="help.meals.title">🍽️ Meals &amp; bills</h3>
             <ul>
-              <li>Add a card with <b>➕</b> (top), or by dropping a traveller on empty space.</li>
-              <li><b>Move</b> a card by dragging the <b>⠿ grip</b> or its emoji.</li>
-              <li><b>Rename</b>: tap the title. <b>Total</b>: tap the amount and type.</li>
-              <li><b>Who paid</b>: tap a person's round chip → 💳 marks the payer.</li>
-              <li><b>Exact share</b>: press &amp; hold a person's name to type their amount (📌 = custom).</li>
-              <li><b>✕ Close</b> keeps the bill in history; <b>🗑 Delete</b> removes it.</li>
+              <li data-i18n-html="help.meals.1">Add a card with <b>➕</b> (top), or by dropping a traveller on empty space.</li>
+              <li data-i18n-html="help.meals.2"><b>Move</b> a card by dragging the <b>⠿ grip</b> or its emoji.</li>
+              <li data-i18n-html="help.meals.3"><b>Rename</b>: tap the title. <b>Total</b>: tap the amount and type.</li>
+              <li data-i18n-html="help.meals.4"><b>Who paid</b>: tap a person's round chip → 💳 marks the payer.</li>
+              <li data-i18n-html="help.meals.5"><b>Exact share</b>: press &amp; hold a person's name to type their amount (📌 = custom).</li>
+              <li data-i18n-html="help.meals.6"><b>✕ Close</b> keeps the bill in history; <b>🗑 Delete</b> removes it.</li>
             </ul>
           </section>
           <section>
-            <h3>🖐️ Moving the board</h3>
+            <h3 data-i18n="help.board.title">🖐️ Moving the board</h3>
             <ul>
-              <li><b>One finger</b> on empty space (or a card's blank body) drags the board.</li>
-              <li><b>Two fingers</b> pan; <b>pinch</b> to zoom.</li>
-              <li>Rotate your phone — whatever was centred stays centred.</li>
+              <li data-i18n-html="help.board.1"><b>One finger</b> on empty space (or a card's blank body) drags the board.</li>
+              <li data-i18n-html="help.board.2"><b>Two fingers</b> pan; <b>pinch</b> to zoom.</li>
+              <li data-i18n-html="help.board.3">Rotate your phone — whatever was centred stays centred.</li>
             </ul>
           </section>
           <section>
-            <h3>💰 Shared budgets</h3>
+            <h3 data-i18n="help.budgets.title">💰 Shared budgets</h3>
             <ul>
-              <li>In Settings, set a traveller to <b>“shared with …”</b> to pool money (e.g. a couple).</li>
-              <li>Meals still split <b>per person</b>, but who owes whom is settled <b>per budget</b>.</li>
+              <li data-i18n-html="help.budgets.1">In Settings, set a traveller to <b>“shared with …”</b> to pool money (e.g. a couple).</li>
+              <li data-i18n-html="help.budgets.2">Meals still split <b>per person</b>, but who owes whom is settled <b>per budget</b>.</li>
             </ul>
           </section>
           <section>
-            <h3>📂 Drawers</h3>
+            <h3 data-i18n="help.drawers.title">📂 Drawers</h3>
             <ul>
-              <li><b>Bills history</b>: the ☰ button.</li>
-              <li><b>Settings</b>: the ⚙️ button.</li>
-              <li>The <b>Bills</b> drawer has a report button (a table icon, top-right) that opens the detailed <b>Report</b> drawer.</li>
-              <li>The phone's <b>Back</b> button closes an open drawer.</li>
+              <li data-i18n-html="help.drawers.1"><b>Bills history</b>: the ☰ button.</li>
+              <li data-i18n-html="help.drawers.2"><b>Settings</b>: the ⚙️ button.</li>
+              <li data-i18n-html="help.drawers.3">The <b>Bills</b> drawer has a report button (a table icon, top-right) that opens the detailed <b>Report</b> drawer.</li>
+              <li data-i18n-html="help.drawers.4">The phone's <b>Back</b> button closes an open drawer.</li>
             </ul>
           </section>
-          <p class="help-foot">
+          <p class="help-foot" data-i18n-html="help.foot">
             Everything here is also learnable by tapping around — nothing destructive happens without a
             confirmation. Come back any time via ⚙️ Settings → ❓.
           </p>
@@ -465,8 +477,8 @@
       <div class="osync-backdrop" data-siano-offlinesync-close></div>
       <div class="osync-panel">
         <div class="osync-head">
-          <h2>📡 Offline sync</h2>
-          <button class="round-btn" data-siano-offlinesync-close aria-label="Close offline sync">✕</button>
+          <h2 data-i18n="osync.modalTitle">📡 Offline sync</h2>
+          <button class="round-btn" data-siano-offlinesync-close aria-label="Close offline sync" data-i18n-attr="aria-label:osync.closeAria">✕</button>
         </div>
         <div class="osync-body">
           <!-- Send: the (highlighted) start button, then progress, then the
@@ -474,17 +486,17 @@
                streamed QR here, and doubles as the receiver's camera preview. -->
           <!-- The button IS the progress bar: a green fill sweeps across it
                left→right while sending (see .osync-btn--go.is-sending). -->
-          <button type="button" class="btn-block osync-btn--go" data-siano-offlinesync-send>Start sending</button>
+          <button type="button" class="btn-block osync-btn--go" data-siano-offlinesync-send data-i18n="osync.startSending">Start sending</button>
           <!-- Shown only while sending (toggled in interactions.js). -->
-          <p class="osync-note osync-note--muted osync-sending-note hidden">All of this trip's bills are being sent on a continuous loop. Now press Receive on the other phone.</p>
+          <p class="osync-note osync-note--muted osync-sending-note hidden" data-i18n="osync.sendingLoopNote">All of this trip's bills are being sent on a continuous loop. Now press Receive on the other phone.</p>
           <div class="osync-qr" aria-hidden="true">
-            <span class="osync-qr-note">QR code / camera will appear here</span>
+            <span class="osync-qr-note" data-i18n="osync.qrPlaceholder">QR code / camera will appear here</span>
           </div>
           <!-- Receive onto another phone. -->
-          <p class="osync-note">Tap the button below on the other phone — the one that will receive the bills.</p>
+          <p class="osync-note" data-i18n="osync.receiveLead">Tap the button below on the other phone — the one that will receive the bills.</p>
           <!-- Also a progress bar: fills once left→right on press (no loop). -->
-          <button type="button" class="btn-block osync-btn--go" data-siano-offlinesync-receive>Start receiving</button>
-          <p class="osync-note osync-note--muted">After tapping, allow camera access if your phone asks for it.</p>
+          <button type="button" class="btn-block osync-btn--go" data-siano-offlinesync-receive data-i18n="osync.startReceiving">Start receiving</button>
+          <p class="osync-note osync-note--muted" data-i18n="osync.cameraHint">After tapping, allow camera access if your phone asks for it.</p>
         </div>
       </div>
     </div>
@@ -499,21 +511,22 @@
       <div class="onboard-panel" role="dialog" aria-modal="true" aria-labelledby="onboard-title">
         <div class="onboard-head">
           <div class="onboard-badge" aria-hidden="true">🧳</div>
-          <h2 id="onboard-title">Welcome to Siano!</h2>
-          <p class="onboard-lede">
+          <h2 id="onboard-title" data-i18n="onboard.title">Welcome to Siano!</h2>
+          <p class="onboard-lede" data-i18n="onboard.lede">
             First time here? Start by naming your trip and the fellow travellers
             coming along — like this. You can change any of it later.
           </p>
         </div>
         <div class="onboard-body">
           <label class="onboard-field">
-            <span class="onboard-label">Trip name</span>
+            <span class="onboard-label" data-i18n="onboard.tripLabel">Trip name</span>
             <input
               id="onboard-trip"
               type="search"
               class="onboard-input"
               placeholder="e.g. Italy 2026"
               aria-label="Trip name"
+              data-i18n-attr="placeholder:onboard.tripPlaceholder;aria-label:onboard.tripAria"
               autocomplete="off"
               autocorrect="off"
               spellcheck="false"
@@ -524,15 +537,15 @@
             />
           </label>
           <div class="onboard-field">
-            <span class="onboard-label">Travellers</span>
+            <span class="onboard-label" data-i18n="onboard.travellersLabel">Travellers</span>
             <!-- Traveller name rows are inserted here by onboarding.js. -->
             <div id="onboard-people" class="onboard-people"></div>
-            <button type="button" id="onboard-add" class="onboard-add">＋ Add another traveller</button>
+            <button type="button" id="onboard-add" class="onboard-add" data-i18n="onboard.addAnother">＋ Add another traveller</button>
           </div>
         </div>
         <div class="onboard-actions">
-          <button type="button" id="onboard-later" class="onboard-later">Later</button>
-          <button type="button" id="onboard-done" class="onboard-done">Done</button>
+          <button type="button" id="onboard-later" class="onboard-later" data-i18n="onboard.later">Later</button>
+          <button type="button" id="onboard-done" class="onboard-done" data-i18n="onboard.done">Done</button>
         </div>
       </div>
     </div>
@@ -544,8 +557,8 @@
       <div class="confirm-panel">
         <p class="confirm-message"></p>
         <div class="confirm-actions">
-          <button type="button" class="confirm-no">No</button>
-          <button type="button" class="confirm-yes">Yes</button>
+          <button type="button" class="confirm-no" data-i18n="confirm.no">No</button>
+          <button type="button" class="confirm-yes" data-i18n="confirm.yes">Yes</button>
         </div>
       </div>
     </div>

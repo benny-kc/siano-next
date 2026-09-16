@@ -26,8 +26,9 @@ import { fullscreenPreferred } from "./fullscreen.js";
 import { installState } from "./install.js";
 import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
+import { t, activeLocale, localePref, LOCALES } from "./i18n.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 13);
+registerVersion("js/ui/board.js", 14);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -74,13 +75,13 @@ export function randomMealIcons(n = 25) {
 // handler in interactions.js ignores taps inside `.icon-grid`.
 function iconGrid(meal, actions) {
   return el("div", {
-    class: "icon-grid", "aria-label": "Choose an icon",
+    class: "icon-grid", "aria-label": t("card.iconPickerLabel"),
     onpointerdown: (e) => e.preventDefault(),
   },
     ...ui.iconPickerIcons.map((icon) =>
       el("button", {
         type: "button", class: "icon-tile",
-        title: "Use this icon", onclick: () => actions.setMealEmoji(meal.id, icon),
+        title: t("card.useIcon"), onclick: () => actions.setMealEmoji(meal.id, icon),
       }, icon)),
   );
 }
@@ -132,7 +133,7 @@ function fmtCreatedAt(ms) {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return null;
   const d = new Date(ms);
   if (Number.isNaN(d.getTime())) return null;
-  const mon = d.toLocaleString("en-US", { month: "short" });
+  const mon = d.toLocaleString(activeLocale(), { month: "short" });
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
   return `${d.getDate()} ${mon}, ${hh}:${mm}`;
@@ -181,27 +182,27 @@ function trashIcon() {
 function mealCard(meal, snap, actions) {
   // header: grip + emoji (both drag handles), name, close
   const head = el("div", { class: "meal-head" },
-    el("span", { class: "drag-handle drag-grip", title: "Drag to move" }, "⠿"),
-    el("span", { class: "drag-handle drag-emoji", title: "Tap to change icon · drag to move" }, meal.emoji || "🍽️"),
+    el("span", { class: "drag-handle drag-grip", title: t("card.gripTitle") }, "⠿"),
+    el("span", { class: "drag-handle drag-emoji", title: t("card.emojiTitle") }, meal.emoji || "🍽️"),
     el("input", {
-      class: "meal-name", value: meal.name, placeholder: "Meal name", "aria-label": "Meal name",
-      title: "Tap to rename · drag to move", ...NO_AUTOFILL, autocapitalize: "words",
+      class: "meal-name", value: meal.name, placeholder: t("card.mealNamePlaceholder"), "aria-label": t("card.mealNameAria"),
+      title: t("card.mealNameTitle"), ...NO_AUTOFILL, autocapitalize: "words",
       onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } },
       onchange: (e) => actions.setMealName(meal.id, e.target.value),
     }),
-    el("button", { class: "meal-close", title: "Close card (kept in Bills history)", onclick: () => actions.closeMeal(meal.id) }, "✕"),
+    el("button", { class: "meal-close", title: t("card.closeTitle"), onclick: () => actions.closeMeal(meal.id) }, "✕"),
   );
 
   // total row
   const badge = meal.hasCustomShares
-    ? el("span", { class: "per-head" }, "custom 📌")
+    ? el("span", { class: "per-head" }, t("card.customBadge"))
     : meal.perHeadCents > 0
-      ? el("span", { class: "per-head" }, `${format(meal.perHeadCents)}/head`)
+      ? el("span", { class: "per-head" }, t("card.perHead", { amount: format(meal.perHeadCents) }))
       : null;
   const total = el("div", { class: "meal-total" },
-    el("span", { class: "label" }, "Total"),
+    el("span", { class: "label" }, t("card.total")),
     el("input", {
-      class: "amount-input siano-amount", "aria-label": "total",
+      class: "amount-input siano-amount", "aria-label": t("card.totalAria"),
       value: meal.amountCents > 0 ? format(meal.amountCents) : "", placeholder: "0.00",
       ...NO_AUTOFILL, inputmode: "decimal", dataset: { mealId: meal.id },
       onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } },
@@ -214,7 +215,7 @@ function mealCard(meal, snap, actions) {
   const rows = meal.participants.map((p) => {
     const key = `${meal.id}:${p.id}`;
     const payerBtn = el("button", {
-      type: "button", class: "payer-btn" + (p.isPayer ? " is-payer" : ""), title: "Mark as payer",
+      type: "button", class: "payer-btn" + (p.isPayer ? " is-payer" : ""), title: t("card.markPayer"),
       onclick: () => actions.setPayer(meal.id, p.id),
     }, p.isPayer ? "💳" : (p.initials || "?"));
 
@@ -227,35 +228,35 @@ function mealCard(meal, snap, actions) {
             onblur: (e) => actions.saveShare(meal.id, p.id, e.target.value),
           }),
         )
-      : el("div", { class: "pbody", title: "Hold to set an exact share", dataset: { longpress: "1", mealId: meal.id, memberId: p.id } },
+      : el("div", { class: "pbody", title: t("card.holdShare"), dataset: { longpress: "1", mealId: meal.id, memberId: p.id } },
           el("span", { class: "pname" }, p.name),
           el("span", { class: "pshare" }, format(p.shareCents)),
-          p.locked ? el("span", { class: "pin", title: "Custom share" }, "📌") : null,
+          p.locked ? el("span", { class: "pin", title: t("card.customShareTitle") }, "📌") : null,
         );
 
-    const chip = el("div", { class: "pchip animate-pop", style: `background-color:${p.color}`, title: `${p.name} · ${format(p.shareCents)}${p.isPayer ? " · paid" : ""}` },
+    const chip = el("div", { class: "pchip animate-pop", style: `background-color:${p.color}`, title: `${p.name} · ${format(p.shareCents)}${p.isPayer ? t("card.paidSuffix") : ""}` },
       payerBtn, body,
-      el("button", { type: "button", class: "premove", title: "Remove from meal", onclick: () => actions.toggleParticipant(meal.id, p.id, false) }, "✕"),
+      el("button", { type: "button", class: "premove", title: t("card.removeFromMeal"), onclick: () => actions.toggleParticipant(meal.id, p.id, false) }, "✕"),
     );
 
     const diff = p.isPayer && meal.allSharesFixed
-      ? el("span", { class: "diff-badge animate-pop", title: "Bill total minus everyone's declared shares — aim for 0.00" }, signed(meal.diffCents))
+      ? el("span", { class: "diff-badge animate-pop", title: t("card.diffTitle") }, signed(meal.diffCents))
       : null;
 
     return el("div", { class: "participant-row" }, chip, diff);
   });
 
   const dropzone = el("div", { class: "dropzone" },
-    meal.participants.length === 0 ? el("p", { class: "hint" }, "drop travellers here") : null,
+    meal.participants.length === 0 ? el("p", { class: "hint" }, t("card.dropHere")) : null,
     el("div", { class: "participants" }, ...rows),
   );
 
   const created = fmtCreatedAt(meal.createdAt);
   const foot = el("div", { class: "meal-foot" },
-    created ? el("span", { class: "meal-time", title: "When this bill was created" }, created) : null,
+    created ? el("span", { class: "meal-time", title: t("card.createdTitle") }, created) : null,
     el("button", {
-      type: "button", class: "delete", title: "Delete bill", "aria-label": `Delete ${meal.name}`,
-      dataset: { confirm: `Delete “${meal.name || "this bill"}” permanently? This removes its cost from everyone's balance.`, confirmAction: `deleteMeal:${meal.id}` },
+      type: "button", class: "delete", title: t("card.deleteTitle"), "aria-label": t("card.deleteAria", { name: meal.name }),
+      dataset: { confirm: t("confirm.deleteMeal", { name: meal.name || t("card.thisBill") }), confirmAction: `deleteMeal:${meal.id}` },
     }, trashIcon()),
   );
 
@@ -265,7 +266,7 @@ function mealCard(meal, snap, actions) {
   },
     ui.iconPickerMealId === meal.id ? iconGrid(meal, actions) : null,
     head, total, dropzone,
-    meal.participants.length ? el("p", { class: "meal-hint" }, "hold a name to set an exact share · 💳 marks who paid") : null,
+    meal.participants.length ? el("p", { class: "meal-hint" }, t("card.mealHint")) : null,
     foot,
     conflictNote(meal.conflicts),
   );
@@ -274,13 +275,13 @@ function mealCard(meal, snap, actions) {
 function conflictNote(conflicts) {
   if (!conflicts) return null;
   const bits = [];
-  if (conflicts.amount) bits.push(`total also set to ${conflicts.amount.map((c) => format(c.value)).join(", ")}`);
+  if (conflicts.amount) bits.push(t("card.conflictAmount", { values: conflicts.amount.map((c) => format(c.value)).join(", ") }));
   if (conflicts.shares) {
     for (const cs of Object.values(conflicts.shares)) {
-      bits.push(`a share also set to ${cs.map((c) => format(c.cents)).join(", ")}`);
+      bits.push(t("card.conflictShare", { values: cs.map((c) => format(c.cents)).join(", ") }));
     }
   }
-  return el("div", { class: "conflict", title: "Two people set this at once — pick one." }, "⚠ " + bits.join("; "));
+  return el("div", { class: "conflict", title: t("card.conflictTitle") }, "⚠ " + bits.join("; "));
 }
 
 // ── Transient quick-actions row (above the dock) ──────────────────────────────
@@ -300,9 +301,9 @@ function renderQuickActions(snap, actions) {
   host.replaceChildren(
     el("button", {
       type: "button", class: "quick-add-all",
-      title: "Add every traveller to this new meal",
+      title: t("quick.addAllTitle"),
       onclick: () => actions.quickAddAll(mealId),
-    }, "(+ add all)"),
+    }, t("quick.addAll")),
   );
 }
 
@@ -318,13 +319,15 @@ function travellerToken(m) {
 }
 
 // ── Bills drawer contents ─────────────────────────────────────────────────────
+// Sort keys are stable; the labels are resolved through t() at render time (see
+// renderSortMenu) so they follow the active language.
 const SORT_OPTIONS = [
-  ["Name (A–Z)", "name_asc"],
-  ["Name (Z–A)", "name_desc"],
-  ["Date added (oldest first)", "created_asc"],
-  ["Date added (newest first)", "created_desc"],
-  ["Amount (low to high)", "cash_asc"],
-  ["Amount (high to low)", "cash_desc"],
+  ["bills.sort.nameAsc", "name_asc"],
+  ["bills.sort.nameDesc", "name_desc"],
+  ["bills.sort.createdAsc", "created_asc"],
+  ["bills.sort.createdDesc", "created_desc"],
+  ["bills.sort.cashAsc", "cash_asc"],
+  ["bills.sort.cashDesc", "cash_desc"],
 ];
 
 function sortBills(bills, sort) {
@@ -342,11 +345,11 @@ function sortBills(bills, sort) {
 function renderSortMenu(actions) {
   const box = document.getElementById("bills-sort-menu");
   box.replaceChildren(
-    ...SORT_OPTIONS.map(([label, key]) =>
+    ...SORT_OPTIONS.map(([labelKey, key]) =>
       el("button", {
         type: "button", class: ui.billsSort === key ? "active" : "",
         onclick: () => actions.setBillsSort(key),
-      }, el("span", {}, label), ui.billsSort === key ? el("span", {}, "✓") : null)),
+      }, el("span", {}, t(labelKey)), ui.billsSort === key ? el("span", {}, "✓") : null)),
   );
 }
 
@@ -366,7 +369,7 @@ function renderBills(snap, actions) {
   }
 
   if (snap.bills.length === 0) {
-    kids.push(el("p", { class: "card-note" }, "No bills yet — tap ➕ to add one."));
+    kids.push(el("p", { class: "card-note" }, t("bills.empty")));
   } else {
     const filtered = ui.billsFilter
       ? snap.bills.filter((b) => b.memberIds.includes(ui.billsFilter))
@@ -380,32 +383,32 @@ function renderBills(snap, actions) {
   if (ui.billsFilter) {
     const name = snap.members.find((m) => m.id === ui.billsFilter)?.name;
     kids.push(el("p", { class: "card-note", style: "text-align:center" },
-      `Showing only ${name || "one traveller"}'s bills — tap their name again to see all.`));
+      t("bills.filtered", { name: name || t("bills.oneTraveller") })));
   }
 
   root.replaceChildren(...kids);
 }
 
 function billRow(bill, actions) {
-  const people = `${bill.participantCount} ${bill.participantCount === 1 ? "person" : "people"}`;
+  const people = t("bills.people", { n: bill.participantCount });
   const meta = people +
-    (bill.payerName ? ` · ${bill.payerName} paid` : "") +
-    (bill.complete ? "" : " · draft");
+    (bill.payerName ? t("bills.paidBy", { name: bill.payerName }) : "") +
+    (bill.complete ? "" : t("bills.draftSuffix"));
   return el("li", { class: "bill-row" },
     el("button", { type: "button", class: "bill-open", onclick: () => actions.openMeal(bill.id) },
       el("span", { class: "emoji" }, bill.emoji || "🍽️"),
       el("span", { class: "info" },
-        el("span", { class: "bname" }, bill.name || "Untitled"),
+        el("span", { class: "bname" }, bill.name || t("common.untitled")),
         el("span", { class: "bmeta" }, meta),
       ),
       el("span", { class: "amt" },
         el("span", { class: "money" }, format(bill.amountCents)),
-        el("span", { class: "state " + (bill.open ? "on" : "off") }, bill.open ? "on board" : "closed"),
+        el("span", { class: "state " + (bill.open ? "on" : "off") }, bill.open ? t("bills.onBoard") : t("bills.closed")),
       ),
     ),
     el("button", {
-      type: "button", class: "bill-del", title: "Delete bill", "aria-label": `Delete ${bill.name}`,
-      dataset: { confirm: `Delete “${bill.name || "this bill"}” permanently? This removes its cost from everyone's balance.`, confirmAction: `deleteMeal:${bill.id}` },
+      type: "button", class: "bill-del", title: t("card.deleteTitle"), "aria-label": t("card.deleteAria", { name: bill.name }),
+      dataset: { confirm: t("confirm.deleteMeal", { name: bill.name || t("card.thisBill") }), confirmAction: `deleteMeal:${bill.id}` },
     }, "🗑"),
   );
 }
@@ -449,14 +452,14 @@ function debugSection(actions) {
   if (!DEBUG) return null;
   const on = debugEnabled();
   const toggle = el("div", { class: "appear-row" },
-    el("span", { class: "lbl" }, "Debug"),
+    el("span", { class: "lbl" }, t("menu.debug.label")),
     el("button", {
       type: "button", class: "toggle", "aria-pressed": String(on),
       onclick: () => actions.toggleDebug(),
-    }, on ? "On" : "Off"),
+    }, on ? t("common.on") : t("common.off")),
   );
 
-  const kids = [el("h3", {}, "🐞 Debug"), toggle];
+  const kids = [el("h3", {}, t("menu.debug.title")), toggle];
   if (on) {
     const list = el("ul", { class: "debug-versions" },
       ...fileVersions().map(({ file, version }) =>
@@ -467,9 +470,9 @@ function debugSection(actions) {
     );
     // How the page itself was served — is a service worker (the offline shell
     // cache) controlling this tab? A stale cache is the usual culprit here.
-    const sw = navigator.serviceWorker && navigator.serviceWorker.controller ? "service worker" : "network";
+    const sw = navigator.serviceWorker && navigator.serviceWorker.controller ? t("menu.debug.serviceWorker") : t("menu.debug.network");
     kids.push(
-      el("p", { class: "debug-note" }, `Loaded ${fileVersions().length} JS modules · served via ${sw}.`),
+      el("p", { class: "debug-note" }, t("menu.debug.note", { n: fileVersions().length, via: sw })),
       list,
     );
   }
@@ -494,60 +497,72 @@ function installSection(actions) {
 
   if (state === "ios") {
     return el("section", { class: "install-card" },
-      el("h3", {}, "📲 Install Siano"),
+      el("h3", {}, t("menu.install.title")),
       el("p", { class: "install-note" },
-        "Add Siano to your Home Screen for a full-screen, offline-ready app:",
+        t("menu.install.iosLead"),
       ),
       el("ol", { class: "install-steps" },
-        el("li", {}, "Tap the ", el("strong", {}, "Share"), " icon ",
-          el("span", { class: "ios-share", "aria-hidden": "true", html: IOS_SHARE_SVG }), " in the toolbar."),
-        el("li", {}, "Choose ", el("strong", {}, "Add to Home Screen"), "."),
-        el("li", {}, "Tap ", el("strong", {}, "Add"), " — Siano appears on your Home Screen."),
+        el("li", {}, t("menu.install.iosStep1Pre"), el("strong", {}, t("menu.install.share")), t("menu.install.iosStep1Mid"),
+          el("span", { class: "ios-share", "aria-hidden": "true", html: IOS_SHARE_SVG }), t("menu.install.iosStep1Post")),
+        el("li", {}, t("menu.install.iosStep2Pre"), el("strong", {}, t("menu.install.addToHome")), t("menu.install.iosStep2Post")),
+        el("li", {}, t("menu.install.iosStep3Pre"), el("strong", {}, t("menu.install.add")), t("menu.install.iosStep3Post")),
       ),
     );
   }
 
   // "installable" — Chromium (Android / desktop) handed us a prompt to replay.
   return el("section", { class: "install-card" },
-    el("h3", {}, "📲 Install Siano"),
+    el("h3", {}, t("menu.install.title")),
     el("p", { class: "install-note" },
-      "Install Siano as an app — full-screen, offline-ready, one tap from your Home Screen.",
+      t("menu.install.androidNote"),
     ),
     el("button", { type: "button", class: "btn-block install-btn", onclick: () => actions.installApp() },
-      "⬇️ Install app"),
+      t("menu.install.androidBtn")),
   );
 }
 
 // Appearance — per-device typography (font, size, boldness). Client-only,
 // applied live via CSS vars on <html> (see ui/typography.js); nothing synced.
 function appearanceSection(actions) {
-  const t = getTypography();
-  const pct = Math.round(t.scale * 100);
+  const tp = getTypography();
+  const pct = Math.round(tp.scale * 100);
 
   const theme = el("div", { class: "appear-row" },
-    el("span", { class: "lbl" }, "Theme"),
+    el("span", { class: "lbl" }, t("menu.appearance.theme")),
     el("div", { class: "seg" },
-      el("button", { type: "button", class: "seg-btn" + (t.theme !== "light" ? " active" : ""), "aria-pressed": String(t.theme !== "light"), onclick: () => actions.setTheme("dark") }, "🌙 Dark"),
-      el("button", { type: "button", class: "seg-btn" + (t.theme === "light" ? " active" : ""), "aria-pressed": String(t.theme === "light"), onclick: () => actions.setTheme("light") }, "☀️ Light"),
+      el("button", { type: "button", class: "seg-btn" + (tp.theme !== "light" ? " active" : ""), "aria-pressed": String(tp.theme !== "light"), onclick: () => actions.setTheme("dark") }, t("menu.appearance.dark")),
+      el("button", { type: "button", class: "seg-btn" + (tp.theme === "light" ? " active" : ""), "aria-pressed": String(tp.theme === "light"), onclick: () => actions.setTheme("light") }, t("menu.appearance.light")),
     ),
   );
 
   const size = el("div", { class: "appear-row" },
-    el("span", { class: "lbl" }, "Text size"),
+    el("span", { class: "lbl" }, t("menu.appearance.textSize")),
     el("div", { class: "size-ctl" },
-      el("button", { type: "button", class: "size-btn", title: "Smaller", "aria-label": "Smaller text", disabled: t.scale <= SCALE_MIN + 1e-9, onclick: () => actions.stepTextSize(-1) }, el("span", { class: "sm" }, "A")),
+      el("button", { type: "button", class: "size-btn", title: t("menu.appearance.smaller"), "aria-label": t("menu.appearance.smallerAria"), disabled: tp.scale <= SCALE_MIN + 1e-9, onclick: () => actions.stepTextSize(-1) }, el("span", { class: "sm" }, "A")),
       el("span", { class: "size-val" }, `${pct}%`),
-      el("button", { type: "button", class: "size-btn", title: "Larger", "aria-label": "Larger text", disabled: t.scale >= SCALE_MAX - 1e-9, onclick: () => actions.stepTextSize(1) }, el("span", { class: "lg" }, "A")),
+      el("button", { type: "button", class: "size-btn", title: t("menu.appearance.larger"), "aria-label": t("menu.appearance.largerAria"), disabled: tp.scale >= SCALE_MAX - 1e-9, onclick: () => actions.stepTextSize(1) }, el("span", { class: "lg" }, "A")),
     ),
   );
 
   const weight = el("div", { class: "appear-row" },
-    el("span", { class: "lbl" }, "Font weight"),
+    el("span", { class: "lbl" }, t("menu.appearance.weight")),
     el("div", { class: "size-ctl" },
-      el("button", { type: "button", class: "size-btn", title: "Lighter", "aria-label": "Lighter text", disabled: t.weight <= WEIGHT_MIN, onclick: () => actions.stepWeight(-1) }, el("span", { class: "sm", style: "font-weight:400" }, "B")),
-      el("span", { class: "size-val" }, String(400 + t.weight)),
-      el("button", { type: "button", class: "size-btn", title: "Bolder", "aria-label": "Bolder text", disabled: t.weight >= WEIGHT_MAX, onclick: () => actions.stepWeight(1) }, el("span", { class: "lg", style: "font-weight:900" }, "B")),
+      el("button", { type: "button", class: "size-btn", title: t("menu.appearance.lighter"), "aria-label": t("menu.appearance.lighterAria"), disabled: tp.weight <= WEIGHT_MIN, onclick: () => actions.stepWeight(-1) }, el("span", { class: "sm", style: "font-weight:400" }, "B")),
+      el("span", { class: "size-val" }, String(400 + tp.weight)),
+      el("button", { type: "button", class: "size-btn", title: t("menu.appearance.bolder"), "aria-label": t("menu.appearance.bolderAria"), disabled: tp.weight >= WEIGHT_MAX, onclick: () => actions.stepWeight(1) }, el("span", { class: "lg", style: "font-weight:900" }, "B")),
     ),
+  );
+
+  // Language — per-device, follows the browser by default ("auto"). The picker
+  // lists the languages we ship by their own name (endonym); missing strings in
+  // a partly-translated language fall back to English (see js/i18n/*).
+  const langSel = el("select", { class: "budget-select", "aria-label": t("menu.appearance.languageAria"), onchange: (e) => actions.setLocale(e.target.value) },
+    el("option", { value: "auto", selected: localePref() === "auto" }, t("menu.appearance.languageAuto")),
+    ...LOCALES.map((l) => el("option", { value: l.code, selected: localePref() === l.code }, l.endonym)),
+  );
+  const language = el("div", { class: "appear-row" },
+    el("span", { class: "lbl" }, t("menu.appearance.language")),
+    langSel,
   );
 
   // The full-screen toggle only makes sense in a browser tab (it re-enters the
@@ -558,56 +573,56 @@ function appearanceSection(actions) {
   const fullscreen = installState() === "standalone"
     ? null
     : el("div", { class: "appear-row" },
-        el("span", { class: "lbl" }, "Full screen"),
-        el("button", { type: "button", class: "toggle", "aria-pressed": String(fs), onclick: () => actions.toggleFullscreen() }, fs ? "On" : "Off"),
+        el("span", { class: "lbl" }, t("menu.appearance.fullscreen")),
+        el("button", { type: "button", class: "toggle", "aria-pressed": String(fs), onclick: () => actions.toggleFullscreen() }, fs ? t("common.on") : t("common.off")),
       );
 
   const fonts = el("div", { class: "font-pills" },
     ...FONTS.map((f) =>
       el("button", {
-        type: "button", class: "pill" + (f.id === t.family ? " active" : ""),
-        style: `font-family:${f.stack}`, "aria-pressed": String(f.id === t.family),
+        type: "button", class: "pill" + (f.id === tp.family ? " active" : ""),
+        style: `font-family:${f.stack}`, "aria-pressed": String(f.id === tp.family),
         onclick: () => actions.setFont(f.id),
       }, f.label)),
   );
 
   return el("section", {},
-    el("h3", {}, "Appearance"),
-    theme, size, weight, fullscreen, fonts,
-    el("button", { type: "button", class: "btn-block", onclick: () => actions.resetAppearance() }, "↺ Reset appearance"),
+    el("h3", {}, t("menu.appearance.title")),
+    theme, size, weight, language, fullscreen, fonts,
+    el("button", { type: "button", class: "btn-block", onclick: () => actions.resetAppearance() }, t("menu.appearance.reset")),
   );
 }
 
 function travellersSection(snap, actions) {
   const items = snap.members.map((m) => {
     const select = el("select", { class: "budget-select", onchange: (e) => actions.setMemberBudget(m.id, e.target.value) },
-      el("option", { value: m.id, selected: m.budgetSolo }, "on their own"),
+      el("option", { value: m.id, selected: m.budgetSolo }, t("menu.travellers.solo")),
       ...snap.members.filter((o) => o.id !== m.id).map((o) =>
-        el("option", { value: o.id, selected: !m.budgetSolo && o.id === m.budgetPartnerId }, `shared with ${o.name}`)),
+        el("option", { value: o.id, selected: !m.budgetSolo && o.id === m.budgetPartnerId }, t("menu.travellers.sharedWith", { name: o.name }))),
     );
     return el("li", { class: "member-item" },
       el("div", { class: "member-top" },
         el("span", { class: "mini-avatar", style: `background-color:${m.color}` }, m.initials || "?"),
-        el("input", { class: "member-name-input", value: m.name, "aria-label": "traveller name", ...NO_AUTOFILL, autocapitalize: "words", onchange: (e) => actions.setMemberName(m.id, e.target.value) }),
+        el("input", { class: "member-name-input", value: m.name, "aria-label": t("menu.travellers.nameAria"), ...NO_AUTOFILL, autocapitalize: "words", onchange: (e) => actions.setMemberName(m.id, e.target.value) }),
         el("button", {
-          type: "button", class: "x-btn", title: "Remove traveller",
-          dataset: { confirm: `Remove ${m.name} from the trip? Their meals and shares will be recalculated.`, confirmAction: `removeMember:${m.id}` },
+          type: "button", class: "x-btn", title: t("menu.travellers.remove"),
+          dataset: { confirm: t("confirm.removeMember", { name: m.name }), confirmAction: `removeMember:${m.id}` },
         }, "✕"),
       ),
-      el("div", { class: "budget-row" }, el("span", { class: "lbl" }, "💰 budget"), select),
-      m.budgetSolo ? null : el("p", { class: "budget-note" }, `💰 shared budget: ${m.budgetName}`),
+      el("div", { class: "budget-row" }, el("span", { class: "lbl" }, t("menu.travellers.budget")), select),
+      m.budgetSolo ? null : el("p", { class: "budget-note" }, t("menu.travellers.sharedBudget", { name: m.budgetName })),
     );
   });
 
   const addForm = el("form", { class: "add-row", onsubmit: (e) => { e.preventDefault(); const inp = e.target.elements.name; actions.addMember(inp.value); inp.value = ""; } },
     // id lets the empty-dock hint (actions.hintAddTraveller) find this field to
     // blink it as a first-run "start here" cue.
-    el("input", { id: "add-traveller-input", class: "text-input", name: "name", placeholder: "Add traveller…", ...NO_AUTOFILL, autocapitalize: "words" }),
-    el("button", { class: "btn" }, "Add"),
+    el("input", { id: "add-traveller-input", class: "text-input", name: "name", placeholder: t("menu.travellers.addPlaceholder"), ...NO_AUTOFILL, autocapitalize: "words" }),
+    el("button", { class: "btn" }, t("menu.travellers.add")),
   );
 
   return el("section", {},
-    el("h3", {}, "Travellers"),
+    el("h3", {}, t("menu.travellers.title")),
     el("ul", { class: "member-list" }, ...items),
     addForm,
   );
@@ -615,7 +630,7 @@ function travellersSection(snap, actions) {
 
 function budgetsSection(snap) {
   return el("section", {},
-    el("h3", {}, "Budgets ", el("span", { class: "muted" }, "(who owes whom)")),
+    el("h3", {}, t("menu.budgets.title"), el("span", { class: "muted" }, t("menu.budgets.subtitle"))),
     el("ul", { class: "plain-list" },
       ...snap.budgets.map((b) =>
         el("li", { class: "budget-item" },
@@ -623,7 +638,7 @@ function budgetsSection(snap) {
           el("span", { class: "col" },
             el("span", { class: "bn" }, b.name || "—"),
             el("span", { class: "muted-note " + toneClass(b.balanceCents) },
-              b.balanceCents > 0 ? `is owed ${format(b.balanceCents)}` : b.balanceCents < 0 ? `owes ${format(-b.balanceCents)}` : "settled up"),
+              b.balanceCents > 0 ? t("balance.isOwed", { amount: format(b.balanceCents) }) : b.balanceCents < 0 ? t("balance.owes", { amount: format(-b.balanceCents) }) : t("balance.settled")),
           ),
         )),
     ),
@@ -631,10 +646,10 @@ function budgetsSection(snap) {
 }
 
 function totalSection(snap) {
-  const sub = `${snap.memberCount} travellers` + (snap.budgetCount < snap.memberCount ? ` · ${snap.budgetCount} budgets` : "");
+  const sub = t("menu.total.travellers", { n: snap.memberCount }) + (snap.budgetCount < snap.memberCount ? t("menu.total.budgets", { n: snap.budgetCount }) : "");
   return el("section", {},
     el("div", { class: "total-card" },
-      el("p", { class: "lbl" }, "Total tracked"),
+      el("p", { class: "lbl" }, t("menu.total.label")),
       el("p", { class: "big" }, format(snap.totalCents)),
       el("p", { class: "sub" }, sub),
     ),
@@ -643,9 +658,9 @@ function totalSection(snap) {
 
 function settleSection(snap) {
   return el("section", {},
-    el("h3", {}, "Settle up"),
+    el("h3", {}, t("menu.settle.title")),
     snap.settlements.length === 0
-      ? el("p", { class: "card-note" }, "Everyone's even — nothing to settle 🎉")
+      ? el("p", { class: "card-note" }, t("menu.settle.even"))
       : el("ul", { class: "plain-list" },
           ...snap.settlements.map((s) =>
             el("li", { class: "settle-item" },
@@ -672,20 +687,20 @@ function ledgerSection(snap, actions) {
     const pays = snap.settlements.filter((s) => s.from === me.budgetName);
     const collects = snap.settlements.filter((s) => s.to === me.budgetName);
     block = el("div", { class: "ledger-block" },
-      el("p", {}, "Hi ", el("span", { style: `color:${me.color};font-weight:700` }, me.name), " 👋"),
-      me.budgetName !== me.name ? el("p", { class: "muted-note" }, `budget: 💰 ${me.budgetName}`) : null,
+      el("p", {}, t("menu.ledger.hi"), el("span", { style: `color:${me.color};font-weight:700` }, me.name), t("menu.ledger.wave")),
+      me.budgetName !== me.name ? el("p", { class: "muted-note" }, t("menu.ledger.budget", { name: me.budgetName })) : null,
       el("p", { class: "big " + toneClass(me.balanceCents) },
-        me.balanceCents > 0 ? `You are owed ${format(me.balanceCents)}` : me.balanceCents < 0 ? `You owe ${format(-me.balanceCents)}` : "You're settled up"),
+        me.balanceCents > 0 ? t("menu.ledger.youAreOwed", { amount: format(me.balanceCents) }) : me.balanceCents < 0 ? t("menu.ledger.youOwe", { amount: format(-me.balanceCents) }) : t("menu.ledger.youSettled")),
       el("ul", {},
-        ...pays.map((s) => el("li", { class: "pay" }, el("span", {}, `pay ${s.to}`), el("span", { class: "font-mono" }, format(s.amountCents)))),
-        ...collects.map((s) => el("li", { class: "collect" }, el("span", {}, `collect from ${s.from}`), el("span", { class: "font-mono" }, format(s.amountCents)))),
+        ...pays.map((s) => el("li", { class: "pay" }, el("span", {}, t("menu.ledger.pay", { name: s.to })), el("span", { class: "font-mono" }, format(s.amountCents)))),
+        ...collects.map((s) => el("li", { class: "collect" }, el("span", {}, t("menu.ledger.collect", { name: s.from })), el("span", { class: "font-mono" }, format(s.amountCents)))),
       ),
     );
   } else {
-    block = el("p", { class: "muted-note" }, "Pick who you are to see a personal breakdown.");
+    block = el("p", { class: "muted-note" }, t("menu.ledger.pickPrompt"));
   }
 
-  return el("section", {}, el("h3", {}, "Your ledger"), picks, block);
+  return el("section", {}, el("h3", {}, t("menu.ledger.title")), picks, block);
 }
 
 // Offline sync — the QR-stream / offline sync entry point. Opens the
@@ -695,27 +710,27 @@ function ledgerSection(snap, actions) {
 // data-siano-offlinesync-open handler (interactions.js), like the help overlay.
 function offlineSyncSection() {
   return el("section", {},
-    el("h3", {}, "Offline sync"),
-    el("button", { type: "button", class: "btn-block", "data-siano-offlinesync-open": "" }, "📡 Offline sync"),
+    el("h3", {}, t("menu.osync.title")),
+    el("button", { type: "button", class: "btn-block", "data-siano-offlinesync-open": "" }, t("menu.osync.button")),
   );
 }
 
 function tripNameSection(snap, actions) {
   return el("section", {},
-    el("h3", {}, "Trip name"),
+    el("h3", {}, t("menu.trip.title")),
     el("input", {
-      class: "text-input text-input--full", value: snap.name, placeholder: "Name this trip…", "aria-label": "Trip name", ...NO_AUTOFILL, autocapitalize: "words",
+      class: "text-input text-input--full", value: snap.name, placeholder: t("menu.trip.placeholder"), "aria-label": t("menu.trip.aria"), ...NO_AUTOFILL, autocapitalize: "words",
       onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } },
       onchange: (e) => actions.setTripName(e.target.value),
     }),
-    el("p", { class: "trip-id-note" }, "Trip ID: ", el("span", { class: "mono" }, snap.id)),
+    el("p", { class: "trip-id-note" }, t("menu.trip.idLabel"), el("span", { class: "mono" }, snap.id)),
     el("div", { class: "qr-share" },
-      el("div", { class: "qr-box", html: qrSvg(tripUrl(snap.id)), "aria-label": "Trip QR code" }),
-      el("span", { class: "muted-note" }, "Scan to open this trip on another phone"),
+      el("div", { class: "qr-box", html: qrSvg(tripUrl(snap.id)), "aria-label": t("menu.trip.qrAria") }),
+      el("span", { class: "muted-note" }, t("menu.trip.qrNote")),
     ),
     el("div", { class: "admin", style: "margin-top:0.75rem" },
-      el("button", { type: "button", class: "btn-block", onclick: () => actions.share() }, "🔗 Copy trip link"),
-      el("button", { type: "button", class: "btn-block", onclick: () => actions.newTrip() }, "✨ New trip"),
+      el("button", { type: "button", class: "btn-block", onclick: () => actions.share() }, t("menu.trip.copyLink")),
+      el("button", { type: "button", class: "btn-block", onclick: () => actions.newTrip() }, t("menu.trip.newTrip")),
     ),
   );
 }
@@ -726,45 +741,45 @@ function tripNameSection(snap, actions) {
 function tripsSection(snap, actions) {
   const trips = loadTrips();
   const list = trips.length === 0
-    ? el("p", { class: "muted-note" }, "No trips yet.")
+    ? el("p", { class: "muted-note" }, t("menu.trips.empty"))
     : el("ul", { class: "trip-list" },
-        ...trips.map((t) => {
-          const isCurrent = t.id === snap.id;
-          const name = t.name || "Untitled trip";
+        ...trips.map((trip) => {
+          const isCurrent = trip.id === snap.id;
+          const name = trip.name || t("common.untitledTrip");
           return el("li", { class: "trip-item" },
             el("button", {
               type: "button", class: "trip-open", disabled: isCurrent,
-              onclick: () => actions.openTrip(t.id),
+              onclick: () => actions.openTrip(trip.id),
             },
               el("span", { class: "nm" + (isCurrent ? " current" : "") }, name),
-              el("span", { class: "sub" }, t.id.slice(0, 8) + (isCurrent ? " · current" : "")),
+              el("span", { class: "sub" }, trip.id.slice(0, 8) + (isCurrent ? t("menu.trips.current") : "")),
             ),
             el("button", {
-              type: "button", class: "trip-icon-btn", title: "Copy link to share", "aria-label": "Copy link to share",
-              onclick: () => actions.shareTripLink(t.id),
+              type: "button", class: "trip-icon-btn", title: t("menu.trips.copyLink"), "aria-label": t("menu.trips.copyLink"),
+              onclick: () => actions.shareTripLink(trip.id),
             }, "🔗"),
             isCurrent
               ? el("span", { class: "trip-icon-btn", "aria-hidden": "true" })
               : el("button", {
-                  type: "button", class: "trip-icon-btn remove", title: "Remove from this device", "aria-label": "Remove from this device",
-                  dataset: { confirm: `Remove “${name}” from this device? (The trip itself isn't deleted.)`, confirmAction: `removeTrip:${t.id}` },
+                  type: "button", class: "trip-icon-btn remove", title: t("menu.trips.removeDevice"), "aria-label": t("menu.trips.removeDevice"),
+                  dataset: { confirm: t("confirm.removeTrip", { name }), confirmAction: `removeTrip:${trip.id}` },
                 }, "✕"),
           );
         }));
 
-  return el("section", {}, el("h3", {}, "Your trips"), list);
+  return el("section", {}, el("h3", {}, t("menu.trips.title")), list);
 }
 
 function helpSection() {
   return el("section", {},
-    el("button", { type: "button", class: "btn-block", "data-siano-help-open": "" }, "❓ How to use Siano"),
+    el("button", { type: "button", class: "btn-block", "data-siano-help-open": "" }, t("menu.help.button")),
   );
 }
 
 function disclaimerSection() {
   return el("div", { class: "disclaimer" },
-    el("p", { class: "hd" }, "Disclaimer"),
-    el("p", {}, "Siano is provided for informational and convenience purposes only, with no warranty of any kind. It may contain bugs and can make mistakes in its calculations, splitting and tracking, so figures shown here are estimates — not a financial record. Always verify amounts yourselves before settling up. The author accepts no responsibility or liability for any errors, losses or disputes arising from use of this application. By using it you agree you do so at your own risk."),
+    el("p", { class: "hd" }, t("menu.disclaimer.title")),
+    el("p", {}, t("menu.disclaimer.body")),
   );
 }
 
@@ -785,8 +800,7 @@ function renderReport(snap) {
   const cols = rep.members;
 
   if (rep.bills.length === 0 || cols.length === 0) {
-    root.replaceChildren(el("p", { class: "card-note" },
-      "Nothing to report yet — add some travellers and bills, then come back to check the totals and download a backup."));
+    root.replaceChildren(el("p", { class: "card-note" }, t("report.empty")));
     return;
   }
 
@@ -798,11 +812,11 @@ function renderReport(snap) {
   // we repeat the header inside the body every REPEAT_HEADER_EVERY rows so the
   // column labels stay in sight when a long trip's table is scrolled.
   const makeHead = () => el("tr", { class: "matrix-head" },
-    el("th", { class: "name" }, "Bill"),
-    el("th", { class: "left" }, "Payer"),
-    el("th", {}, "Total"),
+    el("th", { class: "name" }, t("report.col.bill")),
+    el("th", { class: "left" }, t("report.col.payer")),
+    el("th", {}, t("report.col.total")),
     ...cols.map((m) => el("th", {}, el("span", { style: `color:${m.color || "var(--slate-300)"}` }, m.name))),
-    el("th", { class: "muted" }, "Diff"),
+    el("th", { class: "muted" }, t("report.col.diff")),
   );
 
   const REPEAT_HEADER_EVERY = 20;
@@ -812,8 +826,8 @@ function renderReport(snap) {
     // first row — that's the thead's job).
     if (i > 0 && i % REPEAT_HEADER_EVERY === 0) body.push(makeHead());
     body.push(el("tr", { class: b.complete ? "" : "draft" },
-      el("th", { class: "name" }, `${b.emoji || "🍽️"} ${b.name || "Untitled"}`,
-        b.complete ? null : el("span", { class: "draft-tag" }, " · draft")),
+      el("th", { class: "name" }, `${b.emoji || "🍽️"} ${b.name || t("common.untitled")}`,
+        b.complete ? null : el("span", { class: "draft-tag" }, t("report.draftTag"))),
       el("td", { class: "left" }, b.payerName || "—"),
       el("td", { class: "amt" }, format(b.amountCents)),
       ...cols.map((m) =>
@@ -826,21 +840,21 @@ function renderReport(snap) {
 
   const foot = el("tfoot", {},
     el("tr", { class: "sum" },
-      el("th", { class: "name" }, "Consumed"),
+      el("th", { class: "name" }, t("report.consumed")),
       el("td", {}, ""),
       el("td", { class: "amt" }, format(rep.consumedTotalCents)),
       ...cols.map((m) => el("td", {}, format(tot(m.id, "shareCents")))),
       el("td", {}, ""),
     ),
     el("tr", { class: "sum" },
-      el("th", { class: "name" }, "Paid"),
+      el("th", { class: "name" }, t("report.paid")),
       el("td", {}, ""),
       el("td", { class: "amt" }, format(rep.grandTotalCents)),
       ...cols.map((m) => el("td", {}, format(tot(m.id, "paidCents")))),
       el("td", {}, ""),
     ),
     el("tr", { class: "sum net" },
-      el("th", { class: "name" }, "Net"),
+      el("th", { class: "name" }, t("report.net")),
       el("td", {}, ""),
       el("td", { class: "amt " + toneClass(netTotal) }, signed(netTotal)),
       ...cols.map((m) => el("td", { class: toneClass(tot(m.id, "netCents")) }, signed(tot(m.id, "netCents")))),
@@ -858,7 +872,7 @@ function renderReport(snap) {
   // horizontal scroll leaves the origin (see .report-scroll.scrolled in
   // app.css); scroll events don't bubble, so this is wired per-render.
   const kids = [
-    el("h3", {}, "Bills — each traveller's share"),
+    el("h3", {}, t("report.matrixTitle")),
     el("div", {
       class: "report-scroll",
       onscroll: (e) => e.currentTarget.classList.toggle("scrolled", e.currentTarget.scrollLeft > 0),
@@ -866,34 +880,34 @@ function renderReport(snap) {
   ];
   if (rep.draftCount > 0) {
     kids.push(el("p", { class: "muted-note", style: "margin-top:0.5rem" },
-      `${rep.draftCount} draft ${rep.draftCount === 1 ? "bill is" : "bills are"} still incomplete (missing a total, payer or people) and don't count toward the totals.`));
+      t("report.draftNote", { n: rep.draftCount })));
   }
 
   if (snap.budgets.length) {
-    kids.push(el("h3", { style: "margin-top:1.5rem" }, "Balances — per budget"));
+    kids.push(el("h3", { style: "margin-top:1.5rem" }, t("report.balancesTitle")));
     kids.push(el("ul", { class: "plain-list" },
       ...snap.budgets.map((b) =>
         el("li", { class: "settle-item" },
           el("span", { class: "from", style: "color:var(--slate-200)" }, b.name || "—"),
           el("span", { class: "money " + toneClass(b.balanceCents) },
-            b.balanceCents > 0 ? `is owed ${format(b.balanceCents)}` : b.balanceCents < 0 ? `owes ${format(-b.balanceCents)}` : "settled up"),
+            b.balanceCents > 0 ? t("balance.isOwed", { amount: format(b.balanceCents) }) : b.balanceCents < 0 ? t("balance.owes", { amount: format(-b.balanceCents) }) : t("balance.settled")),
         ))));
   }
 
-  kids.push(el("h3", { style: "margin-top:1.5rem" }, "Suggested settlements"));
+  kids.push(el("h3", { style: "margin-top:1.5rem" }, t("report.settlementsTitle")));
   if (snap.settlements.length === 0) {
-    kids.push(el("p", { class: "card-note", style: "color:var(--emerald-400)" }, "🎉 Everyone is settled up."));
+    kids.push(el("p", { class: "card-note", style: "color:var(--emerald-400)" }, t("report.allSettled")));
   } else {
     kids.push(el("ul", { class: "plain-list" },
       ...snap.settlements.map((s) =>
         el("li", { class: "settle-item" },
-          el("span", { class: "from" }, s.from), el("span", { class: "arrow" }, "pays"), el("span", { class: "to" }, s.to),
+          el("span", { class: "from" }, s.from), el("span", { class: "arrow" }, t("report.pays")), el("span", { class: "to" }, s.to),
           el("span", { class: "money" }, format(s.amountCents)),
         ))));
   }
 
   kids.push(el("p", { class: "muted-note", style: "margin-top:1rem;border-top:1px solid var(--slate-800);padding-top:0.75rem" },
-    "Read-only — nothing here changes the board. “Consumed” is a traveller's share of the bills; “Net” is what they fronted minus what they consumed (their balance)."));
+    t("report.footer")));
 
   root.replaceChildren(...kids);
 }
@@ -945,53 +959,53 @@ export async function downloadReportCsv(snap) {
   const rows = [];
 
   // 1. Trip meta.
-  rows.push(["Siano trip report"]);
-  rows.push(["Trip", snap.name || ""]);
-  rows.push(["Trip id", snap.id]);
-  rows.push([`Generated (${tzLabel()})`, now.toLocaleString()]);
-  rows.push(["Total", money2(rep.grandTotalCents)]);
-  rows.push(["Bills", String(completeCount)]);
-  rows.push(["Drafts (not counted)", String(rep.draftCount)]);
-  rows.push(["Travellers", String(cols.length)]);
+  rows.push([t("report.csv.title")]);
+  rows.push([t("report.csv.trip"), snap.name || ""]);
+  rows.push([t("report.csv.tripId"), snap.id]);
+  rows.push([t("report.csv.generated", { tz: tzLabel() }), now.toLocaleString(activeLocale())]);
+  rows.push([t("report.csv.total"), money2(rep.grandTotalCents)]);
+  rows.push([t("report.csv.bills"), String(completeCount)]);
+  rows.push([t("report.csv.drafts"), String(rep.draftCount)]);
+  rows.push([t("report.csv.travellers"), String(cols.length)]);
   rows.push([]);
 
   // 2. Bills × travellers share matrix + summary rows.
-  rows.push(["Bills — each traveller's share"]);
-  rows.push(["Bill", "Payer", "Status", "Total", ...names, "Assigned", "Unassigned"]);
+  rows.push([t("report.csv.matrixTitle")]);
+  rows.push([t("report.csv.colBill"), t("report.csv.colPayer"), t("report.csv.colStatus"), t("report.csv.colTotal"), ...names, t("report.csv.colAssigned"), t("report.csv.colUnassigned")]);
   for (const b of rep.bills) {
     const assigned = b.amountCents - b.diffCents; // = sum of shares
     rows.push([
-      (b.emoji ? b.emoji + " " : "") + (b.name || "Untitled"),
+      (b.emoji ? b.emoji + " " : "") + (b.name || t("common.untitled")),
       b.payerName || "",
-      b.complete ? "complete" : "draft",
+      b.complete ? t("report.csv.statusComplete") : t("report.csv.statusDraft"),
       money2(b.amountCents),
       ...cols.map((m) => (Object.prototype.hasOwnProperty.call(b.shares, m.id) ? money2(b.shares[m.id]) : "")),
       money2(assigned),
       money2(b.diffCents),
     ]);
   }
-  rows.push(["Consumed (share)", "", "", money2(rep.consumedTotalCents), ...cols.map((m) => money2(tot(m.id, "shareCents"))), "", ""]);
-  rows.push(["Paid", "", "", money2(rep.grandTotalCents), ...cols.map((m) => money2(tot(m.id, "paidCents"))), "", ""]);
-  rows.push(["Net (paid - consumed)", "", "", money2(netTotal), ...cols.map((m) => money2(tot(m.id, "netCents"))), "", ""]);
+  rows.push([t("report.csv.rowConsumed"), "", "", money2(rep.consumedTotalCents), ...cols.map((m) => money2(tot(m.id, "shareCents"))), "", ""]);
+  rows.push([t("report.csv.rowPaid"), "", "", money2(rep.grandTotalCents), ...cols.map((m) => money2(tot(m.id, "paidCents"))), "", ""]);
+  rows.push([t("report.csv.rowNet"), "", "", money2(netTotal), ...cols.map((m) => money2(tot(m.id, "netCents"))), "", ""]);
   rows.push([]);
 
   // 3. Per-budget balances.
-  rows.push(["Balances — per budget"]);
-  rows.push(["Budget", "Members", "Paid", "Consumed", "Balance", "Direction"]);
+  rows.push([t("report.csv.balancesTitle")]);
+  rows.push([t("report.csv.colBudget"), t("report.csv.colMembers"), t("report.csv.rowPaid"), t("report.csv.colConsumed"), t("report.csv.colBalance"), t("report.csv.colDirection")]);
   for (const b of snap.budgets) {
     const paid = b.memberIds.reduce((s, id) => s + tot(id, "paidCents"), 0);
     const consumed = b.memberIds.reduce((s, id) => s + tot(id, "shareCents"), 0);
-    const dir = b.balanceCents > 0 ? "is owed" : b.balanceCents < 0 ? "owes" : "settled";
+    const dir = b.balanceCents > 0 ? t("report.csv.dirOwed") : b.balanceCents < 0 ? t("report.csv.dirOwes") : t("report.csv.dirSettled");
     rows.push([b.name, b.memberNames.join(", "), money2(paid), money2(consumed), money2(b.balanceCents), dir]);
   }
   rows.push([]);
 
   // 4. Suggested settlements.
-  rows.push(["Suggested settlements"]);
+  rows.push([t("report.csv.settlementsTitle")]);
   if (snap.settlements.length === 0) {
-    rows.push(["Everyone is settled up"]);
+    rows.push([t("report.csv.allSettled")]);
   } else {
-    rows.push(["From", "To", "Amount"]);
+    rows.push([t("report.csv.colFrom"), t("report.csv.colTo"), t("report.csv.colAmount")]);
     for (const s of snap.settlements) rows.push([s.from, s.to, money2(s.amountCents)]);
   }
 
@@ -1028,9 +1042,9 @@ export async function downloadReportCsv(snap) {
 
 // ── Top bar + focus restore ────────────────────────────────────────────────────
 function renderTopBar(snap) {
-  document.getElementById("trip-chip").textContent = snap.name || "Untitled trip";
+  document.getElementById("trip-chip").textContent = snap.name || t("common.untitledTrip");
   document.getElementById("bill-count").textContent = String(snap.billCount);
-  document.getElementById("bill-word").textContent = snap.billCount === 1 ? "bill" : "bills";
+  document.getElementById("bill-word").textContent = snap.billCount === 1 ? t("topbar.bill") : t("topbar.bills");
   document.getElementById("total").textContent = format(snap.totalCents);
   document.title = snap.name ? `${snap.name} · Siano` : "Siano";
 }
@@ -1063,7 +1077,7 @@ export function render(snap, actions) {
       : [el("button", {
           type: "button", class: "dock-empty",
           onclick: () => actions.hintAddTraveller(),
-        }, "No travellers yet — tap here to add your first traveller in ⚙️ Settings.")]),
+        }, t("board.dockEmpty"))]),
   );
 
   renderQuickActions(snap, actions);
