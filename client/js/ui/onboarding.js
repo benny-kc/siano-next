@@ -12,8 +12,9 @@
 // travellers as ops); "Later" — or the backdrop — just dismisses it. Either way
 // the overlay is a one-shot for this boot: dismissing it never reopens it.
 
+import { t } from "./i18n.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/onboarding.js", 1);
+registerVersion("js/ui/onboarding.js", 2);
 
 const START_ROWS = 3; // a few empty name fields to invite more than one traveller
 const MAX_ROWS = 24; // a soft cap so "+" can't spawn an unbounded list
@@ -27,8 +28,8 @@ function personRow(n) {
   const input = document.createElement("input");
   input.type = "search";
   input.className = "onboard-input";
-  input.placeholder = `Traveller ${n}`;
-  input.setAttribute("aria-label", `Traveller ${n} name`);
+  input.placeholder = t("app.travellerDefault", { n });
+  input.setAttribute("aria-label", t("onboard.travellerNameAria", { n }));
   input.autocomplete = "off";
   input.setAttribute("autocorrect", "off");
   input.spellcheck = false;
