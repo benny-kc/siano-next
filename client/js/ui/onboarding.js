@@ -14,7 +14,7 @@
 
 import { t } from "./i18n.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/onboarding.js", 2);
+registerVersion("js/ui/onboarding.js", 3);
 
 const START_ROWS = 3; // a few empty name fields to invite more than one traveller
 const MAX_ROWS = 24; // a soft cap so "+" can't spawn an unbounded list
@@ -47,11 +47,18 @@ function personRow(n) {
  * is the list of non-blank traveller names in order. "Later" / backdrop dismiss
  * without calling back. Idempotent per boot — a second call while it's open is a
  * no-op.
+ *
+ * `force: true` bypasses the once-per-boot guard so the overlay can be replayed
+ * on demand (the temporary "Preview welcome screen" button in Settings). Each
+ * call wires its listeners through an AbortController that `close()` aborts, so
+ * a replay never stacks duplicate handlers on the shared buttons.
  */
-export function showOnboarding({ onDone } = {}) {
+export function showOnboarding({ onDone, force = false } = {}) {
   const modal = document.getElementById("onboard-modal");
-  if (!modal || modal.dataset.shown === "1") return;
+  if (!modal || (modal.dataset.shown === "1" && !force)) return;
   modal.dataset.shown = "1";
+  const ac = new AbortController();
+  const on = (el, ev, fn) => el.addEventListener(ev, fn, { signal: ac.signal });
 
   const tripInput = modal.querySelector("#onboard-trip");
   const people = modal.querySelector("#onboard-people");
@@ -72,6 +79,8 @@ export function showOnboarding({ onDone } = {}) {
   };
 
   const close = () => {
+    ac.abort(); // drop this showing's listeners so a replay can't stack them
+    modal.dataset.shown = ""; // allow a forced re-show (Settings preview button)
     modal.style.opacity = "0";
     setTimeout(() => modal.classList.add("hidden"), 200);
   };
@@ -85,16 +94,16 @@ export function showOnboarding({ onDone } = {}) {
     if (typeof onDone === "function") onDone({ tripName, names });
   };
 
-  addBtn.addEventListener("click", addRow);
-  laterBtn.addEventListener("click", close);
-  doneBtn.addEventListener("click", done);
-  backdrop.addEventListener("click", close);
+  on(addBtn, "click", addRow);
+  on(laterBtn, "click", close);
+  on(doneBtn, "click", done);
+  on(backdrop, "click", close);
   // Enter in the trip name jumps to the first traveller; Enter in the last
   // traveller row adds another — a keyboard-only path through the form.
-  tripInput.addEventListener("keydown", (e) => {
+  on(tripInput, "keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); people.querySelector("input")?.focus(); }
   });
-  people.addEventListener("keydown", (e) => {
+  on(people, "keydown", (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
     const inputs = Array.from(people.querySelectorAll("input"));
