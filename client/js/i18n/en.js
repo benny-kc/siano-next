@@ -264,6 +264,8 @@ export default {
   "app.toast.linkCopied": "Trip link copied — share it to invite others",
   "app.toast.linkCopiedGroup": "🔗 Link copied — share it with your group.",
   "app.toast.installing": "Installing Siano…",
+  // TEMPORARY (dev aid): shown by the Settings "Preview welcome screen" button.
+  "app.toast.onboardingSoon": "Welcome screen in 5s…",
   "app.failedStart": "Failed to start: ",
 
   // ── Offline sync (interactions.js dynamic states) ─────────────────────────────

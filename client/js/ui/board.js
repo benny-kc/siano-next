@@ -28,7 +28,7 @@ import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { t, activeLocale, localePref, LOCALES } from "./i18n.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 15);
+registerVersion("js/ui/board.js", 16);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -431,6 +431,7 @@ function renderMenu(snap, actions) {
       tripNameSection(snap, actions),
       tripsSection(snap, actions),
       appearanceSection(actions),
+      onboardingPreviewSection(actions),
       debugSection(actions),
       helpSection(),
       disclaimerSection(),
@@ -773,6 +774,20 @@ function tripsSection(snap, actions) {
 function helpSection() {
   return el("section", {},
     el("button", { type: "button", class: "btn-block", "data-siano-help-open": "" }, t("menu.help.button")),
+  );
+}
+
+// TEMPORARY (dev aid): a button to replay the first-run welcome/onboarding
+// overlay without wiping the device's data, so the onboarding screen can be
+// reviewed on demand. Tapping it toasts, then force-shows the overlay ~5s later
+// (see app.js actions.previewOnboarding). Remove this section, its action, and
+// the "app.toast.onboardingSoon" string once onboarding/tutorial work lands.
+function onboardingPreviewSection(actions) {
+  return el("section", { class: "onboard-preview-section" },
+    el("h3", {}, "Onboarding (dev)"),
+    el("p", { class: "muted-note" }, "Temporary — replay the first-run welcome screen (shows ~5s after tapping)."),
+    el("button", { type: "button", class: "btn-block", onclick: () => actions.previewOnboarding() },
+      "Preview welcome screen"),
   );
 }
 

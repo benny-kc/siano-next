@@ -31,7 +31,7 @@ import { debugEnabled, setDebugEnabled } from "./ui/debug.js";
 import { applyI18n, setLocalePref, t } from "./ui/i18n.js";
 import { dlog, derror } from "./log.js";
 import { registerVersion } from "./version.js";
-registerVersion("js/app.js", 6);
+registerVersion("js/app.js", 7);
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const EMOJIS = ["🍽️", "🍕", "🍔", "🍜", "🍣", "🥘", "🍰", "🍺", "🍷", "☕", "🛒", "🚕", "🏨", "🎟️", "⛽", "🍦"];
@@ -282,6 +282,16 @@ async function main() {
     // (see ui/debug.js + ui/board.js debugSection). A client-only aid.
     toggleDebug: () => { setDebugEnabled(!debugEnabled()); schedulePaint(); },
 
+    // TEMPORARY (dev aid): replay the first-run welcome overlay on demand, so
+    // the onboarding screen can be reviewed without wiping the device's data.
+    // Waits ~5s (mirrors the "just opened the app" moment) then force-shows it.
+    // Remove once onboarding/tutorial work lands. See board.js
+    // onboardingPreviewSection + ui/onboarding.js (`force`).
+    previewOnboarding: () => {
+      toast(t("app.toast.onboardingSoon"));
+      setTimeout(() => showOnboarding({ onDone: seedFromOnboarding, force: true }), 5000);
+    },
+
     // PWA install: replay Chromium's captured prompt (must run from this click).
     // The section repaints itself via initInstall's hook when the state changes.
     installApp: async () => {
@@ -384,14 +394,14 @@ async function main() {
   // trip in one go. "Done" names the trip and adds the named travellers as ops
   // (empty names are skipped; a blank trip name is left as-is); "Later" just
   // dismisses. Emitting these ops flows through the normal subscribe -> repaint
-  // path, so the board fills in behind the fading overlay.
+  // path, so the board fills in behind the fading overlay. The same seed handler
+  // backs the temporary Settings "Preview welcome screen" button.
+  const seedFromOnboarding = ({ tripName, names }) => {
+    if (tripName) actions.setTripName(tripName);
+    for (const name of names) actions.addMember(name);
+  };
   if (firstTime) {
-    showOnboarding({
-      onDone: ({ tripName, names }) => {
-        if (tripName) actions.setTripName(tripName);
-        for (const name of names) actions.addMember(name);
-      },
-    });
+    showOnboarding({ onDone: seedFromOnboarding });
   }
 
   // Top-bar + primary "add meal" button.
