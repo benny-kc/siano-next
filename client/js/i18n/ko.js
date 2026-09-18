@@ -253,6 +253,10 @@ export default {
   "onboard.addAnother": "＋ 여행자 한 명 더 추가",
   "onboard.later": "나중에",
   "onboard.done": "완료",
+  "onboard.about": "Siano는 그룹 여행을 위한 비용 분담 앱입니다. 비용을 나누고, 누가 무엇을 냈는지 기록하고, 마지막에 공정하게 정산하세요.",
+  "onboard.tagSplit": "비용 나누기",
+  "onboard.tagTrack": "비용 추적",
+  "onboard.tagSettle": "정산하기",
   "onboard.travellerNameAria": ({ n }) => `여행자 ${n} 이름`,
 
   "osync.modalTitle": "📡 오프라인 동기화",

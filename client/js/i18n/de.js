@@ -263,6 +263,10 @@ export default {
   "onboard.addAnother": "＋ Weiteren Reisenden hinzufügen",
   "onboard.later": "Später",
   "onboard.done": "Fertig",
+  "onboard.about": "Siano teilt Rechnungen auf Gruppenreisen: Kosten teilen, nachverfolgen, wer was bezahlt hat, und am Ende fair abrechnen.",
+  "onboard.tagSplit": "Rechnungen teilen",
+  "onboard.tagTrack": "Kosten verfolgen",
+  "onboard.tagSettle": "Abrechnen",
   "onboard.travellerNameAria": ({ n }) => `Name Reisender ${n}`,
 
   "osync.modalTitle": "📡 Offline-Sync",

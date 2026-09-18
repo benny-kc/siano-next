@@ -302,6 +302,10 @@ export default {
   "onboard.addAnother": "＋ Dodaj kolejnego podróżnego",
   "onboard.later": "Później",
   "onboard.done": "Gotowe",
+  "onboard.about": "Siano dzieli rachunki podczas wspólnych wyjazdów: dzielcie koszty, śledźcie kto za co zapłacił i rozliczcie się sprawiedliwie na koniec.",
+  "onboard.tagSplit": "Dziel rachunki",
+  "onboard.tagTrack": "Śledź koszty",
+  "onboard.tagSettle": "Rozliczaj się",
   "onboard.travellerNameAria": ({ n }) => `Imię: Podróżny ${n}`,
 
   // ── Offline sync ──────────────────────────────────────────────────────────────

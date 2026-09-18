@@ -263,6 +263,10 @@ export default {
   "onboard.addAnother": "＋ Añadir otro viajero",
   "onboard.later": "Más tarde",
   "onboard.done": "Hecho",
+  "onboard.about": "Siano divide cuentas en viajes en grupo: comparte gastos, controla quién pagó qué y salda las cuentas de forma justa al final.",
+  "onboard.tagSplit": "Divide cuentas",
+  "onboard.tagTrack": "Controla gastos",
+  "onboard.tagSettle": "Salda cuentas",
   "onboard.travellerNameAria": ({ n }) => `Nombre del viajero ${n}`,
 
   "osync.modalTitle": "📡 Sincronización sin conexión",

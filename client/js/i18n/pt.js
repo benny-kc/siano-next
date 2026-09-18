@@ -263,6 +263,10 @@ export default {
   "onboard.addAnother": "＋ Adicionar outro viajante",
   "onboard.later": "Mais tarde",
   "onboard.done": "Concluído",
+  "onboard.about": "O Siano divide contas em viagens de grupo: partilhe custos, acompanhe quem pagou o quê e acerte as contas de forma justa no fim.",
+  "onboard.tagSplit": "Dividir contas",
+  "onboard.tagTrack": "Acompanhar custos",
+  "onboard.tagSettle": "Acertar contas",
   "onboard.travellerNameAria": ({ n }) => `Nome do viajante ${n}`,
 
   "osync.modalTitle": "📡 Sincronização offline",

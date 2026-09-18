@@ -253,6 +253,10 @@ export default {
   "onboard.addAnother": "＋ 再添加一位旅行者",
   "onboard.later": "以后再说",
   "onboard.done": "完成",
+  "onboard.about": "Siano 是团体旅行的账单分摊工具：分摊费用、记录谁付了什么，最后公平地结算。",
+  "onboard.tagSplit": "分摊账单",
+  "onboard.tagTrack": "记录费用",
+  "onboard.tagSettle": "结算",
   "onboard.travellerNameAria": ({ n }) => `旅行者 ${n} 的姓名`,
 
   "osync.modalTitle": "📡 离线同步",

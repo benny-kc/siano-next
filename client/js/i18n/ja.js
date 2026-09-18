@@ -253,6 +253,10 @@ export default {
   "onboard.addAnother": "＋ 旅行者をもう1人追加",
   "onboard.later": "後で",
   "onboard.done": "完了",
+  "onboard.about": "Siano はグループ旅行の割り勘アプリです。費用を分担し、誰が何を払ったか記録して、最後に公平に精算できます。",
+  "onboard.tagSplit": "割り勘",
+  "onboard.tagTrack": "費用を記録",
+  "onboard.tagSettle": "精算",
   "onboard.travellerNameAria": ({ n }) => `旅行者 ${n} の名前`,
 
   "osync.modalTitle": "📡 オフライン同期",
