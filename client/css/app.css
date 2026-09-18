@@ -2431,6 +2431,31 @@ table.report .tone-zero {
   letter-spacing: -0.01em;
   color: var(--slate-100, var(--slate-200));
 }
+/* "What is this?" blurb + feature chips — tell a newcomer what Siano is for
+   (splitting bills / sharing + tracking costs / settling up) before the how-to. */
+.onboard-about {
+  margin: 0 0 0.75rem;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: var(--slate-300);
+}
+.onboard-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.375rem;
+  margin: 0 0 0.875rem;
+}
+.onboard-tag {
+  font-size: 0.75rem;
+  font-weight: var(--fw-bold);
+  padding: 0.25rem 0.625rem;
+  border-radius: 999px;
+  background: var(--slate-800);
+  border: 1px solid var(--slate-700);
+  color: var(--amber-300);
+  white-space: nowrap;
+}
 .onboard-lede {
   margin: 0;
   font-size: 0.875rem;

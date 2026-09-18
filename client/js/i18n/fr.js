@@ -263,6 +263,10 @@ export default {
   "onboard.addAnother": "＋ Ajouter un autre voyageur",
   "onboard.later": "Plus tard",
   "onboard.done": "Terminé",
+  "onboard.about": "Siano partage les additions lors des voyages en groupe : partagez les frais, suivez qui a payé quoi et réglez les comptes équitablement à la fin.",
+  "onboard.tagSplit": "Partager l’addition",
+  "onboard.tagTrack": "Suivre les frais",
+  "onboard.tagSettle": "Régler les comptes",
   "onboard.travellerNameAria": ({ n }) => `Nom du voyageur ${n}`,
 
   "osync.modalTitle": "📡 Synchronisation hors ligne",

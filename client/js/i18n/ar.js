@@ -272,6 +272,10 @@ export default {
   "onboard.addAnother": "＋ إضافة مسافر آخر",
   "onboard.later": "لاحقًا",
   "onboard.done": "تم",
+  "onboard.about": "سيانو أداة لتقسيم الفواتير في الرحلات الجماعية: شاركوا التكاليف، وتتبّعوا من دفع ماذا، وسوّوا الحسابات بإنصاف في النهاية.",
+  "onboard.tagSplit": "تقسيم الفواتير",
+  "onboard.tagTrack": "تتبّع التكاليف",
+  "onboard.tagSettle": "تسوية الحسابات",
   "onboard.travellerNameAria": ({ n }) => `اسم المسافر ${n}`,
 
   "osync.modalTitle": "📡 مزامنة دون اتصال",

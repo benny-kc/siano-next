@@ -263,6 +263,10 @@ export default {
   "onboard.addAnother": "＋ Aggiungi un altro viaggiatore",
   "onboard.later": "Più tardi",
   "onboard.done": "Fatto",
+  "onboard.about": "Siano divide i conti nei viaggi di gruppo: condividi le spese, tieni traccia di chi ha pagato cosa e salda i conti in modo equo alla fine.",
+  "onboard.tagSplit": "Dividi i conti",
+  "onboard.tagTrack": "Traccia le spese",
+  "onboard.tagSettle": "Salda i conti",
   "onboard.travellerNameAria": ({ n }) => `Nome viaggiatore ${n}`,
 
   "osync.modalTitle": "📡 Sincronizzazione offline",
