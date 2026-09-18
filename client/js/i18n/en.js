@@ -182,6 +182,7 @@ export default {
   "menu.trip.idLabel": "Trip ID: ",
   "menu.trip.qrAria": "Trip QR code",
   "menu.trip.qrNote": "Scan to open this trip on another phone",
+  "menu.trip.e2eNote": "🔒 End-to-end encrypted — the link carries the key; the server can't read your data",
   "menu.trip.copyLink": "🔗 Copy trip link",
   "menu.trip.newTrip": "✨ New trip",
 
@@ -267,6 +268,8 @@ export default {
   // TEMPORARY (dev aid): shown by the Settings "Preview welcome screen" button.
   "app.toast.onboardingSoon": "Welcome screen in 5s…",
   "app.failedStart": "Failed to start: ",
+  // Shown when a trip link was opened without its encryption key (`#k=`).
+  "app.locked.banner": "🔒 This trip link is missing its key, so it can't be decrypted or synced here. Ask for the full share link or scan the trip's QR code.",
 
   // ── Offline sync (interactions.js dynamic states) ─────────────────────────────
   "osync.startSending": "Start sending",

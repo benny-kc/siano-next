@@ -210,3 +210,58 @@ test("hub pulls a reconnecting device's offline-made ops back up (want)", async 
   wsB.close();
   wsC.close();
 });
+
+test("hub relays and dedups ENCRYPTED envelopes without ever holding a key", async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "siano-hub-"));
+  const hub = createHub({ dataDir });
+  const { httpServer } = hub;
+  const port = await listen(httpServer);
+  t.after(async () => {
+    await hub.shutdown();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const { opId } = await import("../client/js/core/lamport.js");
+  const { genTripKey, importTripKey, makeTripCrypto } = await import("../client/js/core/crypto.js");
+  const crypto = makeTripCrypto(await importTripKey(genTripKey()));
+  const url = `ws://127.0.0.1:${port}`;
+  const trip = "trip-encrypted";
+
+  // Device A seals two ops and sends the ENVELOPES (never the plaintext).
+  const A = new Clock("A");
+  const op1 = ops.setTripName(A, "Rome");
+  const op2 = ops.setAmount(A, "meal1", 4899);
+  const env1 = await crypto.encrypt(op1);
+  const env2 = await crypto.encrypt(op2);
+
+  const wsA = await open(url);
+  wsA.send(JSON.stringify({ t: "hello", trip, have: [] }));
+  await next(wsA, (m) => m.t === "sync");
+  wsA.send(JSON.stringify({ t: "op", op: env1 }));
+  wsA.send(JSON.stringify({ t: "op", op: env2 }));
+
+  // A late joiner is handed both envelopes verbatim — the hub stored only opaque
+  // ciphertext (no plaintext op type/amount ever crossed it).
+  const wsB = await open(url);
+  wsB.send(JSON.stringify({ t: "hello", trip, have: [] }));
+  const sync = await next(wsB, (m) => m.t === "sync" && m.ops.length === 2);
+  const blob = JSON.stringify(sync.ops);
+  assert.ok(!blob.includes("set_trip_name") && !blob.includes("4899") && !blob.includes("Rome"),
+    "the hub must never expose plaintext");
+
+  // The envelopes decrypt back to the originals on a keyed device.
+  const decrypted = [];
+  for (const env of sync.ops) decrypted.push(await crypto.decrypt(env));
+  const names = decrypted.map((o) => o.op).sort();
+  assert.deepEqual(names, ["set_amount", "set_trip_name"]);
+
+  // Dedup works on the plaintext envelope id (= opId): re-advertising it pulls nothing.
+  const wsC = await open(url);
+  wsC.send(JSON.stringify({ t: "hello", trip, have: [opId(op1), opId(op2)] }));
+  const syncC = await next(wsC, (m) => m.t === "sync");
+  assert.equal(syncC.ops.length, 0, "hub dedups encrypted ops by their plaintext id");
+
+  wsA.close();
+  wsB.close();
+  wsC.close();
+});

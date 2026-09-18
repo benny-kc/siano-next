@@ -52,7 +52,9 @@ const log = (...a) => console.log(ts(), ...a);
 const warn = (...a) => console.warn(ts(), "WARN", ...a);
 const debug = DEBUG ? (...a) => console.log(ts(), "DEBUG", ...a) : () => {};
 const opBrief = (op) =>
-  `${op.op}${op.mealId ? " meal=" + op.mealId : ""}${op.memberId ? " member=" + op.memberId : ""} @${op.lamport}.${op.device}`;
+  op && op.e
+    ? `enc id=${op.id}` // encrypted envelope — the hub is blind to type/ids/lamport
+    : `${op.op}${op.mealId ? " meal=" + op.mealId : ""}${op.memberId ? " member=" + op.memberId : ""} @${op.lamport}.${op.device}`;
 const clientIp = (req) => req.headers["cf-connecting-ip"] || req.socket?.remoteAddress || "?";
 
 // ---- Static client ---------------------------------------------------------

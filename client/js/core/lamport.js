@@ -16,7 +16,7 @@
 // Trips have only a handful of devices, so an O(devices) vector per op is cheap.
 
 import { registerVersion } from "../version.js";
-registerVersion("js/core/lamport.js", 1);
+registerVersion("js/core/lamport.js", 2);
 
 export class Clock {
   /**
@@ -66,9 +66,16 @@ export function compareOps(a, b) {
   return 0;
 }
 
-/** Stable unique id for an op. A device's lamport strictly increases per op. */
+/**
+ * Stable unique id for an op — the hub's dedup/relay key. Modern ops carry a
+ * random `id` assigned at creation (ops.js), which reveals nothing to the hub and
+ * lets the encrypted envelope expose it in plaintext (crypto.js) while everything
+ * else stays sealed. Legacy ops (and hand-built test ops) with no `id` fall back
+ * to `lamport.device`, which is also unique because a device's lamport strictly
+ * increases per op.
+ */
 export function opId(op) {
-  return `${op.lamport}.${op.device}`;
+  return op.id != null ? op.id : `${op.lamport}.${op.device}`;
 }
 
 /**

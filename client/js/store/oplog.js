@@ -12,9 +12,10 @@
 import { Clock, opId } from "../core/lamport.js";
 import { fold } from "../core/reducer.js";
 import { buildSnapshot } from "../core/snapshot.js";
+import { genTripKey, subtleAvailable } from "../core/crypto.js";
 import { openDb, get, put, putMany, getAll } from "./idb.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/store/oplog.js", 1);
+registerVersion("js/store/oplog.js", 2);
 
 function newDeviceId() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
@@ -117,9 +118,28 @@ export class OpLog {
 /**
  * Open (or create) the IndexedDB-backed store for a trip. Rehydrates the clock
  * and every op from disk, then persists any new op automatically.
+ *
+ * Also resolves the trip's end-to-end encryption key (crypto.js). The key is the
+ * capability that unlocks the trip's data; it is NEVER sent to the hub. Resolution
+ * order (transparent — no password anywhere):
+ *   1. `fragKey` — came in the URL fragment (`/t/<id>#k=…`) or an offline-QR
+ *      import. Persist it locally and use it.
+ *   2. a key already persisted on this device for this trip.
+ *   3. `minted` (a genuinely fresh trip this device just created) — generate one,
+ *      persist it, and flag `keyMinted` so the caller can put it in the URL.
+ *   4. otherwise → `locked`: someone opened a `/t/<id>` link with no `#k=` and this
+ *      device has never held the key. The app runs locally but can't decrypt/sync
+ *      until it gets the full link or QR (never silently forks with a wrong key).
+ * The resolved token (base64url) is attached as `log.keyToken`; `log.locked` /
+ * `log.keyMinted` describe how we got here. Ops themselves are stored PLAINTEXT
+ * on-device (the device holds the key and the user works on decrypted data);
+ * encryption happens only where ops leave the device (sync/client.js, QR export).
+ *
+ * @param {string} tripId
+ * @param {{ fragKey?: string|null, minted?: boolean }} [opts]
  * @returns {Promise<OpLog>}
  */
-export async function openTripStore(tripId) {
+export async function openTripStore(tripId, opts = {}) {
   const db = await openDb(`siano:${tripId}`, 1, {
     ops: { keyPath: "_id" },
     meta: {},
@@ -134,6 +154,27 @@ export async function openTripStore(tripId) {
   const clock = new Clock(device, clockState);
 
   const log = new OpLog(tripId, { clock });
+
+  // Resolve the trip key. Encryption is only possible in a secure context; in an
+  // insecure one (raw LAN IP over http) we degrade to plaintext (keyToken = null)
+  // rather than lock the user out.
+  log.keyToken = null;
+  log.locked = false;
+  log.keyMinted = false;
+  if (subtleAvailable()) {
+    let token = await get(db, "meta", "tripKey");
+    if (opts.fragKey && opts.fragKey !== token) {
+      token = opts.fragKey;
+      await put(db, "meta", token, "tripKey");
+    } else if (!token && opts.minted) {
+      token = genTripKey();
+      await put(db, "meta", token, "tripKey");
+      log.keyMinted = true;
+    }
+    if (token) log.keyToken = token;
+    else log.locked = true; // existing trip link opened without its #k= key
+  }
+
   const stored = await getAll(db, "ops");
   log.ingestMany(stored.map((r) => r.op), { silent: true }); // no listeners yet, don't re-broadcast
 
@@ -146,4 +187,18 @@ export async function openTripStore(tripId) {
   });
 
   return log;
+}
+
+/**
+ * Read a trip's stored encryption key token without opening its full store —
+ * used to build a shareable link (with `#k=…`) for a trip in the device-local
+ * list. Returns the base64url token, or null if none is stored / unavailable.
+ */
+export async function readTripKey(tripId) {
+  try {
+    const db = await openDb(`siano:${tripId}`, 1, { ops: { keyPath: "_id" }, meta: {} });
+    return (await get(db, "meta", "tripKey")) || null;
+  } catch {
+    return null;
+  }
 }

@@ -11,7 +11,14 @@
 //     conflict rather than silently overwritten. Money is always integer cents.
 
 import { registerVersion } from "../version.js";
-registerVersion("js/core/ops.js", 1);
+registerVersion("js/core/ops.js", 2);
+
+// A stable, opaque op-id assigned at creation. It is what the hub dedups/relays
+// on (see lamport.opId) and, crucially, it carries NO information — a random
+// uuid, not derived from lamport/device — so the encrypted-op envelope can expose
+// it in plaintext while keeping the hub fully blind to authorship and ordering.
+const newOpId = () =>
+  globalThis.crypto?.randomUUID ? crypto.randomUUID() : "op-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 export const OP = Object.freeze({
   SET_TRIP_NAME: "set_trip_name",
@@ -47,7 +54,7 @@ export const MONEY_OPS = new Set([OP.SET_AMOUNT, OP.SET_SHARE]);
  * append to the local log and broadcast.
  */
 export function makeOp(clock, op, payload = {}) {
-  return { op, ...payload, ...clock.stamp() };
+  return { id: newOpId(), op, ...payload, ...clock.stamp() };
 }
 
 // --- Convenience constructors (thin wrappers; keep call sites readable) ------

@@ -11,8 +11,16 @@ The hub has **no built-in authentication**. Following the reference app, the
 **trip URL is the capability**: trip ids are 122-bit random values
 (`crypto.randomUUID`), so they are unguessable, and knowing one grants
 read+write to that trip. That's the intended model for share-by-link trips. If
-your trips must be genuinely private, add authentication in front (see
-*Cloudflare Access* below) — the hub alone will not gate access.
+your trips must be genuinely private *from other users*, add authentication in
+front (see *Cloudflare Access* below) — the hub alone will not gate access.
+
+**The operator, however, cannot read trip data.** Ops are **end-to-end
+encrypted** on the device before they are synced: the hub stores and relays only
+opaque ciphertext and never holds the key. So an operator (or anyone who reads
+the disk / a `SIANO_DATA_DIR` backup / the wire) sees which trips exist and how
+much activity each has, but **not** bill names, amounts, who paid, traveller
+names, or even the op types. See [End-to-end encryption](#end-to-end-envelope-encryption)
+below for what leaks and what doesn't.
 
 What a Cloudflare Tunnel gives you, and what it doesn't:
 
@@ -24,6 +32,93 @@ What a Cloudflare Tunnel gives you, and what it doesn't:
   frame, or a connection flood looks like ordinary application traffic and lands
   directly on Node. Those are the hub's job to survive — and the hardening below
   is aimed squarely at them.
+
+## End-to-end (envelope) encryption
+
+The hub is a **dumb relay** — it has no business logic and, by design, **no access
+to user data**. Every op is encrypted on the device *before* it leaves, so the hub
+only ever stores and forwards ciphertext. There is nothing for the user to set up:
+**no password, nothing to type** — it is transparent.
+
+### How the key travels (transparent, no password)
+
+The trip's encryption key rides in the **URL fragment**:
+
+```
+https://siano.example.com/t/<tripId>#k=<base64url 256-bit key>
+```
+
+The fragment (`#…`) is a client-only part of a URL — **browsers never send it to
+the server** — so the hub sees `/t/<tripId>` but never `#k=…`. Opening the link
+(or scanning the trip's **QR code**, which encodes the same URL) unlocks the trip;
+the key is then cached in the device's local store so later visits work without the
+fragment. Sharing the trip means sharing that link/QR — exactly the existing
+"trip URL is the capability" model, now extended so the capability also carries the
+decryption key.
+
+This means: **anyone with the full link can decrypt** (that's how you invite
+people), but the **operator/hub specifically cannot** — it never receives the
+fragment. If someone opens a `/t/<id>` link with the `#k=` part trimmed off, the
+app runs locally but shows a "missing key" banner and does not sync (it never
+silently forks the trip with a wrong or absent key).
+
+### The envelope (why "envelope encryption")
+
+Each op is sealed with a fresh random **data key (DEK)**; that DEK is then
+**wrapped** (encrypted) under the trip **key (KEK)** from the fragment. Both travel
+together — the data key is *enveloped* by the key key. The unit on the wire and on
+the hub's disk is:
+
+```
+{ e: 1,                 // format marker ⇒ encrypted
+  id: "<opId>",         // PLAINTEXT — the only field the hub needs (dedup/relay)
+  k:  "<b64url: wrapIv(12) || AES-GCM(KEK, rawDEK)>",   // the wrapped data key
+  iv: "<b64url: dataIv(12)>",
+  ct: "<b64url: AES-GCM(DEK, JSON.stringify(op))>" }     // the sealed op
+```
+
+All crypto is **AES-256-GCM** via the Web Crypto API (`crypto.subtle`), authenticated
+(GCM tags detect tampering) and dependency-free. The implementation is
+`client/js/core/crypto.js`; it is exercised by `test/crypto.test.mjs` under
+`node --test`.
+
+### What leaks vs. what doesn't
+
+| The hub CAN see | The hub CANNOT see |
+|---|---|
+| trip id (`/t/<id>` path) | bill names, amounts, payer, traveller names |
+| an opaque, random op-id per op | the op **type** (`add_meal`, `set_amount`, …) |
+| op count, size, timing | authoring **device** id, lamport, version vector |
+| — | anything else in the op payload |
+
+The op-id is a random uuid assigned at creation (`client/js/core/ops.js`), so it
+reveals nothing about authorship or ordering; it exists only so the hub can dedup
+and negotiate the sync delta (`have`/`want`).
+
+### Boundaries & caveats (read these)
+
+- **On-device storage is plaintext.** The op-log in IndexedDB is *not* encrypted at
+  rest — the device holds the key and the user works on decrypted data. At-rest
+  protection there is the OS/browser's job (device lock, disk encryption), not the
+  trip key's. Encryption applies to data **in transit and on the hub**.
+- **Secure context required.** `crypto.subtle` is only available in a secure context
+  (`https://`, or `http://localhost`). Behind Cloudflare (https) and on localhost
+  this is always the case. In an **insecure** context (e.g. hitting a raw LAN IP over
+  `http://`) the client falls back to today's **plaintext** relay with a one-time
+  console warning rather than breaking — so serve the app over https/localhost if you
+  want the guarantee. Don't mix secure and insecure devices on one trip (an insecure
+  device can't read the encrypted ops and would diverge).
+- **It is confidentiality, not integrity/authorship.** Anyone with the trip URL can
+  still write ops (the capability model is unchanged), and ops are not yet
+  individually signed — per-device op signing remains a roadmap item. Encryption
+  stops the *operator* and *network* from reading data; it does not authenticate
+  *which* holder of the link wrote an op.
+- **Peer (hub-to-hub) links** carry the same opaque ciphertext, so a peer hub is as
+  blind as the origin hub. (It can still inject ops into a replicated trip — see the
+  peer trust-boundary note — but cannot read one.)
+- **The key is only in the link + on devices.** There is no key escrow. Lose every
+  device *and* the link and the trip's data is unrecoverable by design. Keep the
+  share link/QR.
 
 ## Hardening built into the hub
 

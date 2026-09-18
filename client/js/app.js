@@ -13,13 +13,14 @@
 // ui/board.js (renderer), ui/interactions.js (gestures), ui/boardview.js
 // (pan/zoom) and ui/viewstate.js (drawer state).
 
-import { openTripStore } from "./store/oplog.js";
+import { openTripStore, readTripKey } from "./store/oplog.js";
 import { lastTripId, rememberTrip, forgetTrip, loadTrips } from "./store/trips.js";
 import { SyncClient } from "./sync/client.js";
 import * as ops from "./core/ops.js";
+import { importTripKey, makeTripCrypto, genTripKey, subtleAvailable } from "./core/crypto.js";
 import { parse } from "./core/money.js";
 import { initialsFor } from "./core/snapshot.js";
-import { render, ui, downloadReportCsv, randomMealIcons } from "./ui/board.js";
+import { render, ui, downloadReportCsv, randomMealIcons, setShareKey, tripShareUrl } from "./ui/board.js";
 import { BoardView } from "./ui/boardview.js";
 import { installViewState, View } from "./ui/viewstate.js";
 import { initInteractions } from "./ui/interactions.js";
@@ -31,7 +32,7 @@ import { debugEnabled, setDebugEnabled } from "./ui/debug.js";
 import { applyI18n, setLocalePref, t } from "./ui/i18n.js";
 import { dlog, derror } from "./log.js";
 import { registerVersion } from "./version.js";
-registerVersion("js/app.js", 7);
+registerVersion("js/app.js", 8);
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const EMOJIS = ["🍽️", "🍕", "🍔", "🍜", "🍣", "🥘", "🍰", "🍺", "🍷", "☕", "🛒", "🚕", "🏨", "🎟️", "⛽", "🍦"];
@@ -46,19 +47,48 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 // Arriving via an explicit /t/<id> link (a shared invite, or a resumed trip) is
 // never "minted", so the first-run welcome won't greet someone joining a trip.
 function currentTripId() {
+  // The end-to-end key rides in the URL FRAGMENT (`#k=<token>`), which browsers
+  // never send to the server — so the hub sees the trip id but never the key.
+  const fragKey = fragKeyFromHash();
   const m = location.pathname.match(/^\/t\/([^/]+)/);
-  if (m) return { id: decodeURIComponent(m[1]), minted: false };
+  if (m) return { id: decodeURIComponent(m[1]), minted: false, fragKey };
   // No trip in the URL (a bare visit to "/"): resume the last trip seen on this
   // device, or mint a fresh one if there is none yet.
   const last = lastTripId();
   const id = last || uid("trip-");
   history.replaceState(null, "", `/t/${id}`);
-  return { id, minted: !last };
+  return { id, minted: !last, fragKey };
+}
+
+// Pull the `#k=<token>` trip key out of the URL fragment, if present.
+function fragKeyFromHash() {
+  const h = location.hash.startsWith("#") ? location.hash.slice(1) : location.hash;
+  const m = h.match(/(?:^|&)k=([^&]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+// Ensure the address bar carries `#k=<token>` so copying the URL from the bar
+// shares a working (decryptable) link. The fragment is client-only; it never
+// reaches the hub. No-op when the token is already present.
+function ensureKeyInUrl(id, token) {
+  if (!token) return;
+  const want = `#k=${encodeURIComponent(token)}`;
+  if (location.hash === want) return;
+  history.replaceState(null, "", `/t/${encodeURIComponent(id)}${want}`);
 }
 
 function wsUrl() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${location.host}`;
+}
+
+// A fresh trip URL, with its encryption key minted into the fragment when the
+// context supports encryption (secure context). In an insecure context we fall
+// back to a keyless URL (plaintext mode).
+function newTripUrl() {
+  const id = uid("trip-");
+  const token = subtleAvailable() ? genTripKey() : null;
+  return `/t/${id}${token ? `#k=${encodeURIComponent(token)}` : ""}`;
 }
 
 function toast(message) {
@@ -70,11 +100,39 @@ function toast(message) {
   node._t = setTimeout(() => node.classList.remove("is-visible"), 2200);
 }
 
+// Persistent notice when a trip link arrived without its encryption key (`#k=`).
+// The trip is usable locally but can't decrypt or sync until it gets the full
+// share link or QR. Distinct id so a repaint never clobbers it.
+function showLockBanner() {
+  if (document.getElementById("lock-banner")) return;
+  const bar = document.createElement("div");
+  bar.id = "lock-banner";
+  bar.className = "lock-banner";
+  bar.setAttribute("role", "status");
+  bar.textContent = t("app.locked.banner");
+  document.body.appendChild(bar);
+}
+
 async function main() {
-  const { id: tripId, minted } = currentTripId();
-  dlog("boot: trip", tripId, "at", location.href);
-  const log = await openTripStore(tripId);
+  const { id: tripId, minted, fragKey } = currentTripId();
+  dlog("boot: trip", tripId, "at", location.pathname);
+  const log = await openTripStore(tripId, { fragKey, minted });
   dlog(`boot: store opened — ${log.allOps().length} ops on device`, "device", log.device);
+
+  // End-to-end encryption key for this trip (from the URL fragment or local
+  // cache; freshly minted for a brand-new trip). Keep it in the address bar so a
+  // copy-from-bar link still works, share it via board's Copy-link/QR, and build
+  // the per-trip crypto that seals ops before they ever reach the hub.
+  const keyToken = log.keyToken;
+  ensureKeyInUrl(tripId, keyToken);
+  setShareKey(keyToken);
+  const tripCrypto = keyToken ? makeTripCrypto(await importTripKey(keyToken)) : null;
+  if (log.locked) {
+    // Opened a /t/<id> link with no #k= key and this device never held it. Run
+    // locally, but don't sync (we can't decrypt others' ops, and shouldn't push
+    // ours in the clear). A banner tells the user how to unlock.
+    showLockBanner();
+  }
 
   // First-run detection: a genuinely fresh device — the trip id was just minted
   // (a bare "/" visit, not a shared /t/ link), this trip has no ops yet (no name,
@@ -134,7 +192,11 @@ async function main() {
   const actions = {
     // What the offline-sync QR stream (sender) transmits: the trip's identity
     // (id + name) AND its ops, so the receiver knows which trip these belong to.
-    exportTrip: () => ({ trip: tripId, name: log.snapshot().name || "", ops: log.allOps() }),
+    // `key` rides along so a device that receives this FOREIGN trip over the QR
+    // channel can decrypt it and later sync it (offline-QR is device-to-device,
+    // camera-to-screen — never through the hub — so carrying the key here is safe
+    // and is what keeps a received trip usable). Ops are the plaintext op-log.
+    exportTrip: () => ({ trip: tripId, name: log.snapshot().name || "", key: keyToken, ops: log.allOps() }),
 
     // Receive a decoded offline-sync envelope. Ops are only ever merged into the
     // trip they belong to — never dumped into whatever trip happens to be open:
@@ -151,13 +213,16 @@ async function main() {
         const added = log.ingestMany(incoming);
         return { sameTrip: true, added: added.length };
       }
-      const other = await openTripStore(srcTrip);
+      // Persist the sender's trip key so the received trip is decryptable + can
+      // sync (the key came device-to-device over QR, never via the hub).
+      const other = await openTripStore(srcTrip, { fragKey: env && env.key });
       const before = other.allOps().length;
       other.ingestMany(incoming);
       const snap = other.snapshot();
       const name = (env && env.name) || snap.name || "";
       rememberTrip(srcTrip, name);
-      return { sameTrip: false, trip: srcTrip, name, billCount: snap.billCount, added: other.allOps().length - before, url: `/t/${encodeURIComponent(srcTrip)}` };
+      const frag = env && env.key ? `#k=${encodeURIComponent(env.key)}` : "";
+      return { sameTrip: false, trip: srcTrip, name, billCount: snap.billCount, added: other.allOps().length - before, url: `/t/${encodeURIComponent(srcTrip)}${frag}` };
     },
 
     setTripName: (name) => log.emit((c) => ops.setTripName(c, name)),
@@ -261,10 +326,14 @@ async function main() {
     pickLedger: (id) => { ui.ledgerMember = ui.ledgerMember === id ? null : id; schedulePaint(); },
 
     share: async () => {
-      try { await navigator.clipboard.writeText(location.href); toast(t("app.toast.linkCopied")); }
-      catch { toast(location.href); }
+      const url = tripShareUrl(tripId); // includes the #k= key when the trip is unlocked
+      try { await navigator.clipboard.writeText(url); toast(t("app.toast.linkCopied")); }
+      catch { toast(url); }
     },
-    newTrip: () => { location.assign(`/t/${uid("trip-")}`); },
+    // A brand-new trip gets its encryption key minted up front and carried in the
+    // fragment, so the fresh page loads already unlocked (and the key never has to
+    // be inferred from a "minted" heuristic).
+    newTrip: () => { location.assign(newTripUrl()); },
 
     // Appearance (per-device typography; applied live, persisted locally).
     setFont: (id) => { setFont(id); schedulePaint(); },
@@ -319,7 +388,9 @@ async function main() {
     // "Your trips" switcher (device-local list).
     openTrip: (id) => { if (id && id !== tripId) location.assign(`/t/${encodeURIComponent(id)}`); },
     shareTripLink: async (id) => {
-      const url = `${location.origin}/t/${encodeURIComponent(id)}`;
+      // Include that trip's own key (from its local store) so the link is usable.
+      const token = id === tripId ? keyToken : await readTripKey(id);
+      const url = `${location.origin}/t/${encodeURIComponent(id)}${token ? `#k=${encodeURIComponent(token)}` : ""}`;
       try { await navigator.clipboard.writeText(url); toast(t("app.toast.linkCopiedGroup")); }
       catch { toast(url); }
     },
@@ -409,14 +480,22 @@ async function main() {
   // Report CSV backup (built from the current snapshot at click time).
   document.getElementById("report-csv").addEventListener("click", () => downloadReportCsv(log.snapshot()));
 
-  // Live sync (optional — the app is fully usable offline).
-  const sync = new SyncClient(wsUrl(), log, {
-    onStatus: (s) => {
-      netEl.textContent = s === "open" ? t("topbar.live") : s === "connecting" ? "…" : t("topbar.offline");
-      netEl.className = "net net--" + (s === "open" ? "open" : s === "connecting" ? "connecting" : "closed");
-    },
-  });
-  sync.connect();
+  // Live sync (optional — the app is fully usable offline). Ops are end-to-end
+  // encrypted at this boundary (tripCrypto), so the hub only ever relays opaque
+  // ciphertext. A locked trip (link opened without its key) doesn't sync at all.
+  if (log.locked) {
+    netEl.textContent = t("topbar.offline");
+    netEl.className = "net net--closed";
+  } else {
+    const sync = new SyncClient(wsUrl(), log, {
+      crypto: tripCrypto,
+      onStatus: (s) => {
+        netEl.textContent = s === "open" ? t("topbar.live") : s === "connecting" ? "…" : t("topbar.offline");
+        netEl.className = "net net--" + (s === "open" ? "open" : s === "connecting" ? "connecting" : "closed");
+      },
+    });
+    sync.connect();
+  }
 
   // NOTE: the service worker is registered from an inline <script> in index.html's
   // <head>, not here, so it installs at the earliest possible point on a first

@@ -19,32 +19,68 @@
 // The `want` half is what makes offline edits survive reconnect: without it the
 // hub only ever pushes ops DOWN to a returning leaf; nothing pulls the leaf's
 // offline-created ops back UP, so those bills stay stranded on one device.
+//
+// END-TO-END ENCRYPTION. This client is the boundary where ops leave the device,
+// so it is where they get sealed. Every op on the wire is an ENCRYPTED ENVELOPE
+// (crypto.js) — the hub relays opaque ciphertext and never holds the key. Local
+// ops are `encrypt`ed just before send; incoming envelopes are `decrypt`ed before
+// they enter the log. `have`/`want` negotiate on the plaintext op-id (`op.id`),
+// which the envelope also carries, so delta reconciliation is unchanged. When no
+// `crypto` is supplied (an insecure context, or a locked trip) we send/ingest ops
+// as-is — the hub falls back to today's plaintext relay.
 
 import { dlog, dwarn } from "../log.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/sync/client.js", 1);
+registerVersion("js/sync/client.js", 2);
 
 export class SyncClient {
   /**
    * @param {string} url   ws:// or wss:// hub URL
    * @param {import("../store/oplog.js").OpLog} log
-   * @param {{onStatus?: (s: "connecting"|"open"|"closed") => void}} [opts]
+   * @param {{onStatus?: (s: "connecting"|"open"|"closed") => void, crypto?: {encrypt(op):Promise<object>, decrypt(env):Promise<object>}|null}} [opts]
    */
   constructor(url, log, opts = {}) {
     this.url = url;
     this.log = log;
     this.onStatus = opts.onStatus || (() => {});
+    this.crypto = opts.crypto || null; // end-to-end envelope crypto, or null (plaintext)
     this.ws = null;
     this.backoff = 1000;
     this.maxBackoff = 30000;
     this.closed = false;
 
     // Broadcast local ops as they're created (remote ops carry local=false and
-    // are never echoed back — that would loop).
+    // are never echoed back — that would loop). Each op is sealed before it leaves.
     this._unsub = log.subscribe(({ ops, local }) => {
       if (!local || !this._isOpen()) return;
-      for (const op of ops) this._send({ t: "op", op });
+      for (const op of ops) this._sealAndSend({ t: "op" }, op);
     });
+  }
+
+  // Encrypt (when crypto is configured) then send. Order within a batch doesn't
+  // matter — the hub dedups by op-id and the reducer is order-independent — so a
+  // per-op async seal that resolves out of order is fine.
+  async _sealAndSend(frame, op) {
+    try {
+      const payload = this.crypto ? await this.crypto.encrypt(op) : op;
+      if (this._isOpen()) this._send({ ...frame, op: payload });
+    } catch (e) {
+      dwarn("sync: failed to encrypt op, not sent", e?.message || e);
+    }
+  }
+
+  // Decrypt a batch of incoming envelopes (dropping any that fail to open) and
+  // ingest the plaintext ops. Returns the ops that were new.
+  async _ingestEnvelopes(envs) {
+    const plain = [];
+    for (const env of envs) {
+      try {
+        plain.push(this.crypto ? await this.crypto.decrypt(env) : env);
+      } catch (e) {
+        dwarn("sync: failed to decrypt an op, skipped", e?.message || e);
+      }
+    }
+    return this.log.ingestMany(plain);
   }
 
   connect() {
@@ -86,11 +122,11 @@ export class SyncClient {
         return;
       }
       if (msg.t === "op" && msg.op) {
-        const added = this.log.ingestMany([msg.op]);
-        dlog(`sync: recv op (${added.length ? "new" : "dup"})`);
+        this._ingestEnvelopes([msg.op]).then((added) =>
+          dlog(`sync: recv op (${added.length ? "new" : "dup"})`));
       } else if ((msg.t === "ops" || msg.t === "sync") && Array.isArray(msg.ops)) {
-        const added = this.log.ingestMany(msg.ops);
-        dlog(`sync: recv ${msg.t} — ${msg.ops.length} ops, ${added.length} new`);
+        this._ingestEnvelopes(msg.ops).then((added) =>
+          dlog(`sync: recv ${msg.t} — ${msg.ops.length} ops, ${added.length} new`));
         // A `sync` may also carry `want`: op-ids the hub is missing that this
         // device holds — its ops created while offline. Push them so they reach
         // the durable log + the other leaves. Skipping this is exactly why ops
@@ -132,7 +168,7 @@ export class SyncClient {
   // long time can accumulate many ops, and a single frame must stay under the
   // hub's max-message cap (256 KiB by default). The hub dedupes on append, so
   // re-sending is always safe.
-  _pushWanted(ids) {
+  async _pushWanted(ids) {
     const ops = [];
     for (const id of ids) {
       const op = this.log.get(id);
@@ -140,9 +176,19 @@ export class SyncClient {
     }
     if (!ops.length) return;
     dlog(`sync: hub wants ${ids.length} ops — pushing ${ops.length} back`);
+    // Seal each before it leaves (or pass through when crypto is off).
+    const sealed = [];
+    for (const op of ops) {
+      try {
+        sealed.push(this.crypto ? await this.crypto.encrypt(op) : op);
+      } catch (e) {
+        dwarn("sync: failed to encrypt a wanted op, skipped", e?.message || e);
+      }
+    }
+    if (!sealed.length || !this._isOpen()) return;
     const BATCH = 200;
-    for (let i = 0; i < ops.length; i += BATCH) {
-      this._send({ t: "ops", ops: ops.slice(i, i + BATCH) });
+    for (let i = 0; i < sealed.length; i += BATCH) {
+      this._send({ t: "ops", ops: sealed.slice(i, i + BATCH) });
     }
   }
 

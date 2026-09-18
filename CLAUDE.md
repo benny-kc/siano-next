@@ -127,6 +127,7 @@ Create ops via the `ops.js` constructors (they stamp the clock). Emit them throu
 | `client/js/core/lamport.js` | `Clock` (Lamport + version vector), `frontier`, `causallyAfter`, `compareOps`, `opId`. |
 | `client/js/core/ops.js` | The op set + stamped constructors; `MONEY_OPS`. |
 | `client/js/core/reducer.js` | `fold(tripId, ops) -> state`. OR-Set + LWW + money-conflict merge. |
+| `client/js/core/crypto.js` | **End-to-end (envelope) encryption** of ops (AES-256-GCM, Web Crypto). `genTripKey`/`importTripKey`/`makeTripCrypto({encrypt,decrypt})`. A fresh per-op data key (DEK) seals the op JSON; the trip key (KEK) wraps the DEK; envelope = `{ e:1, id, k, iv, ct }`. Only `id` (= `opId`, a random uuid) stays plaintext so the hub can dedup/relay — everything else (type, amounts, names, device, lamport, vv) is inside `ct`. The KEK is transparent: it rides in the URL fragment (`/t/<id>#k=…`, never sent to the server) and is cached per device. Legacy/plaintext ops pass through; an insecure context (no `crypto.subtle`) falls back to plaintext. See docs/security.md → *End-to-end encryption*. |
 | `client/js/core/snapshot.js` | `buildSnapshot(state)` — the view the board renders. |
 
 **Client runtime (browser-only, not unit-tested — verify in-browser):**
@@ -212,6 +213,16 @@ edits made while a device was offline propagate the moment it reconnects.
 Full detail in **docs/security.md**. Key points:
 - **No built-in auth** — the trip URL is the capability (122-bit random id). For
   private trips, put **Cloudflare Access** in front.
+- **End-to-end (envelope) encryption** — ops are AES-256-GCM sealed on the device
+  before they sync (`client/js/core/crypto.js`), so the hub is a **zero-knowledge
+  relay**: it stores/forwards opaque `{e:1,id,k,iv,ct}` envelopes and never holds
+  the key. The trip key is transparent (no password): it rides in the URL fragment
+  (`/t/<id>#k=…`, never sent to the server) and is cached per device — sharing the
+  link/QR shares the key. Encryption happens ONLY at the boundaries where ops leave
+  the device (sync + QR export); the pure core and the on-device IndexedDB store
+  stay **plaintext** (the device holds the key). Needs a secure context
+  (https/localhost); an insecure context falls back to plaintext. A `/t/<id>` link
+  opened without its `#k=` key shows a lock banner and does not sync.
 - Hub defaults to binding **`127.0.0.1`** (`HOST`). ⚠ If your tunnel/proxy
   reaches it over a network (separate container/host), set `HOST=0.0.0.0` or it
   returns 502 at the edge. (This was the cause of an outage.)
