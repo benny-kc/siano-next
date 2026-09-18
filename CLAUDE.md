@@ -245,7 +245,7 @@ Full detail in **docs/security.md**. Key points:
 `HOST`, `PORT`, `SIANO_DATA_DIR`, `SIANO_MAX_MSG_BYTES`, `SIANO_MAX_CONNECTIONS`,
 `SIANO_MAX_MSGS_PER_SEC`, `SIANO_ALLOWED_ORIGINS`, `SIANO_MAX_OPS_PER_TRIP`,
 `SIANO_MAX_TRIPS`, `SIANO_MAX_TRIPS_IN_MEMORY`, `SIANO_HEARTBEAT_MS`, `SIANO_TRIP_ID_MAX`, `SIANO_PEER_URL`,
-`SIANO_PEER_TOKEN`, `SIANO_PEER_MAX_MSG_BYTES`, `SIANO_METRICS_TOKEN`, `SIANO_METRICS_TOP_TRIPS`, `SIANO_GITHUB_WEBHOOK`, `SIANO_DEBUG`, `SIANO_CLIENT_DEBUG`,
+`SIANO_PEER_TOKEN`, `SIANO_PEER_MAX_MSG_BYTES`, `SIANO_PEER_RESYNC_MS`, `SIANO_METRICS_TOKEN`, `SIANO_METRICS_TOP_TRIPS`, `SIANO_GITHUB_WEBHOOK`, `SIANO_DEBUG`, `SIANO_CLIENT_DEBUG`,
 `SIANO_ASSET_HASHING`, `SIANO_CACHE_CONTROL`, `SIANO_CDN_CACHE_CONTROL`,
 `SIANO_SW_CACHE_CONTROL`, `SIANO_FORCE_HTTPS`.
 Defaults + meanings are tabled in docs/security.md.
@@ -392,6 +392,20 @@ keep them fixed.
   the client answers by pushing those ops (batched, deduped on the hub). See the
   Sync protocol section. Regression test: `hub.test.mjs` ("pulls a reconnecting
   device's offline-made ops back up").
+- **Anti-entropy while connected** ✅ *(fixed)* — recovery of a lost op used to be
+  tied to the (re)connect handshake alone. But live op delivery is fire-and-forget
+  (`_sealAndSend` / peer `pops`): an op can be dropped while the socket still looks
+  OPEN — a half-open mobile radio, a frozen/backgrounded PWA, one lost frame — and
+  with nothing re-checking the delta until a full reconnect, that op stayed
+  stranded on the OTHER device for the rest of a long-lived session (the "one phone
+  shows 4 travellers, the other only 3, and it never catches up" report). Fixed by
+  running the delta exchange PERIODICALLY and on wake, not only on connect:
+  `SyncClient` re-sends `hello` on an interval (`resyncMs`, 20s) and on
+  `visibilitychange`/`online`/`pageshow` (the hub's hello handler is idempotent);
+  `hub/peer.js` re-`phave`s every trip on each live session (`SIANO_PEER_RESYNC_MS`,
+  30s). Regression tests: `hub.test.mjs` ("recovers a stranded op via the
+  anti-entropy sweep") + `peer.test.mjs` ("periodic anti-entropy heals an op
+  stranded on one hub").
 - **Board is ported** ✅ — the pannable/zoomable board, the traveller dock,
   drag-to-split, draggable meal cards, long-press-to-set-share, the slide-in
   Bills/Settings/Report drawers, help + in-page confirm, and the full game-like

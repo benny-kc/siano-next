@@ -32,6 +32,12 @@
 // for), so any backlog on either side — including trips created while the link
 // was down — flushes on every (re)connect. Live edits then flow as `pops`.
 //
+// `pops` forwarding is fire-and-forget, so a live op can be lost while the link
+// stays up. Reconciliation therefore ALSO runs periodically (anti-entropy —
+// `Session.resync`), not only on connect: each live session re-`phave`s every
+// known trip so a stranded op is healed without the always-on link having to
+// drop and reconnect first.
+//
 // AUTH: peer links offer the `siano-peer` subprotocol (ws.js exempts them from
 // the Origin allowlist — a Node WS client sends no Origin) and present a shared
 // token in `phello`. A mismatch is closed 1008. No token configured ⇒ accepted
@@ -140,6 +146,20 @@ class Session {
     for (const t of theirTrips) if (typeof t === "string") union.add(t);
     debug(`peer: reconciling ${union.size} trips with ${this.tx.label}`);
     for (const trip of union) {
+      if (!isValidTrip(trip)) continue;
+      this.tx.send({ t: "phave", trip, have: logs.all(trip).map(opId) });
+    }
+  }
+
+  // Periodic ANTI-ENTROPY (either role): re-`phave` every trip this hub knows.
+  // `pops` forwarding between hubs is fire-and-forget just like the leaf broadcast
+  // — a live op can be lost while the link stays up, and reconciliation otherwise
+  // only re-runs on a full peer-link reconnect (which, being always-on, may not
+  // happen for a long time). `phave` reconciles BOTH directions, so a re-`phave`
+  // of known trips heals an op stranded on either hub without dropping the link.
+  resync() {
+    const { logs, isValidTrip } = this.mgr.deps;
+    for (const trip of logs.trips()) {
       if (!isValidTrip(trip)) continue;
       this.tx.send({ t: "phave", trip, have: logs.all(trip).map(opId) });
     }
@@ -294,6 +314,10 @@ export function createPeers(deps) {
   const registry = new Set(); // authenticated Sessions (outbound + inbound)
   const dialers = []; // OutboundPeer[]
   let noTokenWarned = false;
+  let resyncTimer = null;
+  // How often each live peer session re-reconciles all known trips (anti-entropy).
+  // 0 disables. Modest by default — one `phave` per trip carries only op ids.
+  const resyncMs = deps.resyncMs ?? 30000;
 
   const mgr = {
     token,
@@ -318,6 +342,18 @@ export function createPeers(deps) {
       const d = new OutboundPeer(url, mgr);
       dialers.push(d);
       d.start();
+    }
+    // Anti-entropy sweep: re-reconcile every live peer session periodically so a
+    // `pops` frame lost over a still-up link is recovered without waiting for the
+    // (always-on, rarely-dropping) link to reconnect. Runs for dialers AND passive
+    // acceptors — `phave` reconciles both directions.
+    if (resyncMs && !resyncTimer) {
+      resyncTimer = setInterval(() => {
+        for (const s of registry) {
+          try { s.resync(); } catch { /* a dead session is cleaned up on close */ }
+        }
+      }, resyncMs);
+      resyncTimer.unref?.();
     }
   }
 
@@ -364,6 +400,7 @@ export function createPeers(deps) {
   }
 
   function shutdown() {
+    if (resyncTimer) { clearInterval(resyncTimer); resyncTimer = null; }
     for (const d of dialers) d.close();
     for (const s of [...registry]) s.tx.close(1001);
     registry.clear();

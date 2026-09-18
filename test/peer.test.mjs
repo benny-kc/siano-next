@@ -139,6 +139,32 @@ test("a backlog created while the link is down flushes on reconnect", async (t) 
   assert.ok(countInboundPeers(A.hub) >= 1, "link re-established");
 });
 
+test("periodic anti-entropy heals an op stranded on one hub over a still-up link", async (t) => {
+  // Regression companion to the leaf-side "stranded traveller" bug, for hub↔hub:
+  // `pops` forwarding is fire-and-forget, so an op can be lost while the always-on
+  // link stays up. It used to reconcile only on (re)connect — which may not happen
+  // for a long time — so the op stayed stranded on the source hub. Each live peer
+  // session now re-`phave`s all trips periodically, healing it without a reconnect.
+  const token = "s3cret";
+  const A = await mkHub(t, { peerToken: token, peerResyncMs: 200 });          // passive
+  const B = await mkHub(t, { peerUrls: [A.url], peerToken: token, peerResyncMs: 200 }); // dials A
+
+  // Wait for the link to come up.
+  const upBy = Date.now() + 4000;
+  while (countInboundPeers(A.hub) === 0 && Date.now() < upBy) await delay(50);
+  assert.equal(countInboundPeers(A.hub), 1, "link is up");
+
+  // Put an op straight into A's durable log — NO fan-out, NO broadcastOp — modelling
+  // a `pops` frame that was lost while the link stayed up. Neither hub reconnects.
+  const ca = new Clock("A");
+  const trip = "trip-strand-hub";
+  const a1 = ops.addMember(ca, "m1", { name: "Ann" });
+  await A.hub.logs.append(trip, a1);
+
+  // The periodic sweep re-reconciles and carries it across to B — no reconnect.
+  await pollTrip(B.port, trip, [opId(a1)], 6000);
+});
+
 test("no token configured: peer links are accepted (open default)", async (t) => {
   const A = await mkHub(t, {}); // no token
   const B = await mkHub(t, { peerUrls: [A.url] }); // no token
