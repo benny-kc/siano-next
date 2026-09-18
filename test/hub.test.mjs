@@ -211,6 +211,49 @@ test("hub pulls a reconnecting device's offline-made ops back up (want)", async 
   wsC.close();
 });
 
+test("a connected device recovers a stranded op via the anti-entropy sweep (no reconnect)", async (t) => {
+  // Regression for the "one phone shows 4 travellers, the other only 3, forever"
+  // bug: live op delivery is fire-and-forget, so an op can be lost while the
+  // socket still looks OPEN. Recovery used to require a full reconnect handshake;
+  // a device that stays connected would never catch up. The SyncClient now
+  // re-runs the hello/sync/want delta exchange periodically on a live link.
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "siano-hub-"));
+  const hub = createHub({ dataDir });
+  const port = await listen(hub.httpServer);
+  t.after(async () => {
+    await hub.shutdown();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const { OpLog } = await import("../client/js/store/oplog.js");
+  const { SyncClient } = await import("../client/js/sync/client.js");
+  const url = `ws://127.0.0.1:${port}`;
+  const trip = "trip-antientropy";
+
+  // A device connects and stays connected (short sweep interval for the test).
+  const log = new OpLog(trip, { device: "B" });
+  const sync = new SyncClient(url, log, { resyncMs: 200 });
+  sync.connect();
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(log.allOps().length, 0, "device starts empty");
+
+  // The hub durably holds an op the device never received (a lost live fan-out),
+  // and the device never reconnects.
+  const A = new Clock("A");
+  await hub.logs.append(trip, ops.addMember(A, "m1", { name: "Ann" }));
+
+  // The periodic sweep re-hellos and pulls the stranded op down — without any
+  // disconnect/reconnect.
+  const deadline = Date.now() + 3000;
+  while (log.allOps().length === 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.equal(log.snapshot().members.length, 1, "anti-entropy recovered the stranded member");
+  assert.equal(log.snapshot().members[0].name, "Ann");
+
+  sync.close();
+});
+
 test("hub relays and dedups ENCRYPTED envelopes without ever holding a key", async (t) => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "siano-hub-"));
   const hub = createHub({ dataDir });

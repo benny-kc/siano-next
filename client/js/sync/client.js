@@ -20,6 +20,15 @@
 // hub only ever pushes ops DOWN to a returning leaf; nothing pulls the leaf's
 // offline-created ops back UP, so those bills stay stranded on one device.
 //
+// ANTI-ENTROPY. The hello/sync/want exchange is also run PERIODICALLY and on wake
+// (tab foregrounded, network back), not only on (re)connect. Live op broadcast is
+// fire-and-forget: an op can be lost while the socket still looks OPEN (a
+// half-open mobile radio, a frozen/backgrounded PWA, a dropped frame), and with
+// recovery previously tied only to a full reconnect handshake, a single op could
+// stay stranded on the OTHER device for the rest of a long-lived session — the
+// "one phone shows 4 travellers, the other only 3, and it never catches up" bug.
+// Re-sending `hello` on a live socket reconciles the delta both ways and heals it.
+//
 // END-TO-END ENCRYPTION. This client is the boundary where ops leave the device,
 // so it is where they get sealed. Every op on the wire is an ENCRYPTED ENVELOPE
 // (crypto.js) — the hub relays opaque ciphertext and never holds the key. Local
@@ -31,13 +40,18 @@
 
 import { dlog, dwarn } from "../log.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/sync/client.js", 2);
+registerVersion("js/sync/client.js", 3);
+
+// How often, while a connection stays OPEN, to re-run the delta exchange as an
+// anti-entropy sweep (see `_resync`). Modest — a stranded op is picked up within
+// this window without a device having to fully disconnect first.
+const RESYNC_MS = 20000;
 
 export class SyncClient {
   /**
    * @param {string} url   ws:// or wss:// hub URL
    * @param {import("../store/oplog.js").OpLog} log
-   * @param {{onStatus?: (s: "connecting"|"open"|"closed") => void, crypto?: {encrypt(op):Promise<object>, decrypt(env):Promise<object>}|null}} [opts]
+   * @param {{onStatus?: (s: "connecting"|"open"|"closed") => void, crypto?: {encrypt(op):Promise<object>, decrypt(env):Promise<object>}|null, resyncMs?: number}} [opts]
    */
   constructor(url, log, opts = {}) {
     this.url = url;
@@ -48,6 +62,8 @@ export class SyncClient {
     this.backoff = 1000;
     this.maxBackoff = 30000;
     this.closed = false;
+    this.resyncMs = opts.resyncMs || RESYNC_MS;
+    this.resyncTimer = null;
 
     // Broadcast local ops as they're created (remote ops carry local=false and
     // are never echoed back — that would loop). Each op is sealed before it leaves.
@@ -55,6 +71,18 @@ export class SyncClient {
       if (!local || !this._isOpen()) return;
       for (const op of ops) this._sealAndSend({ t: "op" }, op);
     });
+
+    // Anti-entropy trigger: something woke this device (tab foregrounded, network
+    // came back). A live op can be lost with the socket still looking OPEN — a
+    // half-open mobile radio, a backgrounded/frozen PWA on iOS, a dropped frame —
+    // and until now nothing re-checked the delta unless the socket fully closed
+    // and re-handshook. That stranded exactly one op on the peer (the "one phone
+    // has 4 travellers, the other only 3, forever" report) while every later edit
+    // still flowed. So re-run the delta exchange on wake, not only on reconnect.
+    this._onWake = () => {
+      if (globalThis.document && globalThis.document.visibilityState === "hidden") return;
+      this._resync("wake");
+    };
   }
 
   // Encrypt (when crypto is configured) then send. Order within a batch doesn't
@@ -85,6 +113,13 @@ export class SyncClient {
 
   connect() {
     this.closed = false;
+    // Wake events (guarded — this module also runs under `node --test`, where
+    // there is no document/window). Recover a stranded op the moment a device
+    // comes back to life instead of waiting for the periodic sweep or a full
+    // reconnect that may never come while the app stays foregrounded.
+    globalThis.document?.addEventListener?.("visibilitychange", this._onWake);
+    globalThis.addEventListener?.("online", this._onWake);
+    globalThis.addEventListener?.("pageshow", this._onWake);
     this._open();
     return this;
   }
@@ -92,11 +127,41 @@ export class SyncClient {
   close() {
     this.closed = true;
     this._unsub?.();
+    this._stopResync();
+    globalThis.document?.removeEventListener?.("visibilitychange", this._onWake);
+    globalThis.removeEventListener?.("online", this._onWake);
+    globalThis.removeEventListener?.("pageshow", this._onWake);
     this.ws?.close();
   }
 
   _isOpen() {
     return this.ws && this.ws.readyState === 1; // WebSocket.OPEN
+  }
+
+  // Re-run the delta exchange on a LIVE connection (anti-entropy). Sending
+  // `hello` again is exactly the reconcile the hub already answers on (re)connect:
+  // it replies with `sync` (ops we lack) + `want` (ops it lacks that we hold), so
+  // a single op lost in either direction over a still-open socket is recovered
+  // without tearing the connection down. The hub's hello handler is idempotent
+  // (join is a Set add), so repeating it is safe and cheap — it carries only op
+  // ids. No-op when the socket isn't open (the next onopen will hello anyway).
+  _resync(why) {
+    if (!this._isOpen()) return;
+    const have = this.log.have();
+    dlog(`sync: resync (${why}) — hello trip=${this.log.tripId} have=${have.length} ops`);
+    this._send({ t: "hello", trip: this.log.tripId, have });
+  }
+
+  _startResync() {
+    this._stopResync();
+    if (!this.resyncMs) return;
+    this.resyncTimer = setInterval(() => this._resync("periodic"), this.resyncMs);
+    // Don't keep a Node process (tests) alive just for the sweep.
+    this.resyncTimer?.unref?.();
+  }
+
+  _stopResync() {
+    if (this.resyncTimer) { clearInterval(this.resyncTimer); this.resyncTimer = null; }
   }
 
   _open() {
@@ -111,6 +176,10 @@ export class SyncClient {
       const have = this.log.have();
       dlog(`sync: open — hello trip=${this.log.tripId} have=${have.length} ops`);
       this._send({ t: "hello", trip: this.log.tripId, have });
+      // Keep reconciling while the link stays up (anti-entropy) — a live op can be
+      // silently dropped without the socket ever closing, and nothing else would
+      // notice until the next full reconnect.
+      this._startResync();
     };
 
     ws.onmessage = (ev) => {
@@ -142,6 +211,7 @@ export class SyncClient {
 
     ws.onclose = (ev) => {
       this.onStatus("closed");
+      this._stopResync();
       // An abnormal close code is the single most useful troubleshooting signal:
       // 1008 = rejected (rate limit / bad trip id), 1009 = message too big,
       // 1006 = never established (often an upgrade 403/blocked, or hub down).

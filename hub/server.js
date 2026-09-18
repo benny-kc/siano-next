@@ -21,6 +21,7 @@
 // Env (all optional): HOST, PORT, SIANO_DATA_DIR, SIANO_MAX_MSG_BYTES,
 //   SIANO_MAX_CONNECTIONS, SIANO_MAX_MSGS_PER_SEC, SIANO_ALLOWED_ORIGINS,
 //   SIANO_MAX_OPS_PER_TRIP, SIANO_MAX_TRIPS, SIANO_HEARTBEAT_MS, SIANO_TRIP_ID_MAX,
+//   SIANO_PEER_RESYNC_MS (hub↔hub anti-entropy sweep interval; default 30000),
 //   SIANO_METRICS_TOKEN (gates GET /metrics; off when unset),
 //   SIANO_GITHUB_WEBHOOK (shared secret gating POST /webhookforgitHub, which
 //     stops the hub for an external supervisor to redeploy; off when unset),
@@ -465,6 +466,9 @@ export function createHub(opts = {}) {
   // connections a much larger frame cap than ordinary clients.
   const peerMaxMessageBytes = opts.peerMaxMessageBytes ??
     num(process.env.SIANO_PEER_MAX_MSG_BYTES, 16 * 1024 * 1024);
+  // How often each live peer link re-reconciles all known trips (anti-entropy),
+  // healing an op that a fire-and-forget `pops` lost while the link stayed up.
+  const peerResyncMs = opts.peerResyncMs ?? num(process.env.SIANO_PEER_RESYNC_MS, 30000);
 
   // GitHub deploy webhook: a shared secret gates POST /webhookforgitHub, which
   // authenticates the delivery (HMAC over the body) and then stops the hub for an
@@ -558,6 +562,7 @@ export function createHub(opts = {}) {
   // A no-peer-URL hub still accepts inbound peer links (a passive listener).
   const peers = createPeers({
     urls: peerUrls, token: peerToken, logs, fanout, isValidTrip: isValidTripId, warn, debug, metrics,
+    resyncMs: peerResyncMs,
   });
 
   const wss = new WebSocketServer(httpServer, {
