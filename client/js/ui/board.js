@@ -28,7 +28,7 @@ import { debugEnabled } from "./debug.js";
 import { DEBUG } from "../log.js";
 import { t, activeLocale, localePref, LOCALES } from "./i18n.js";
 import { registerVersion, fileVersions } from "../version.js";
-registerVersion("js/ui/board.js", 16);
+registerVersion("js/ui/board.js", 17);
 
 // ── Per-viewer UI state (the reference held some of this server-side) ─────────
 export const ui = {
@@ -167,8 +167,17 @@ function qrSvg(url) {
   return svg;
 }
 
-// The canonical shareable URL for this trip (matches the "Copy trip link" text).
-const tripUrl = (id) => `${location.origin}/t/${encodeURIComponent(id)}`;
+// The trip's end-to-end key, set by app.js once resolved. It is appended to every
+// shareable URL (and the QR) as the `#k=` fragment so scanning/opening the link
+// unlocks the trip — the fragment is client-only and never reaches the hub. Null
+// when the trip is locked or running in a plaintext (insecure) context.
+let _shareKey = null;
+export function setShareKey(token) { _shareKey = token || null; }
+
+// The canonical shareable URL for this trip (matches the "Copy trip link" text and
+// the QR). Includes the `#k=` key fragment when the trip is unlocked.
+const tripUrl = (id) => `${location.origin}/t/${encodeURIComponent(id)}${_shareKey ? `#k=${encodeURIComponent(_shareKey)}` : ""}`;
+export const tripShareUrl = tripUrl;
 
 // ── Trash / grip icons as small SVGs ──────────────────────────────────────────
 function trashIcon() {
@@ -728,6 +737,7 @@ function tripNameSection(snap, actions) {
     el("div", { class: "qr-share" },
       el("div", { class: "qr-box", html: qrSvg(tripUrl(snap.id)), "aria-label": t("menu.trip.qrAria") }),
       el("span", { class: "muted-note" }, t("menu.trip.qrNote")),
+      _shareKey ? el("span", { class: "muted-note e2e-note" }, t("menu.trip.e2eNote")) : null,
     ),
     el("div", { class: "admin", style: "margin-top:0.75rem" },
       el("button", { type: "button", class: "btn-block", onclick: () => actions.share() }, t("menu.trip.copyLink")),

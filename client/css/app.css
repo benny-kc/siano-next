@@ -2554,6 +2554,31 @@ table.report .tone-zero {
   transform: translate(-50%, -50%);
 }
 
+/* Persistent notice when a trip link arrived without its encryption key (#k=).
+   Pinned to the top, above the board, clear of the safe-area inset. */
+.lock-banner {
+  position: fixed;
+  left: 0.75rem;
+  right: 0.75rem;
+  top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
+  z-index: 85;
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.75rem;
+  background-color: var(--panel);
+  border: 1px solid var(--amber-500, #f59e0b);
+  color: var(--slate-100);
+  font-size: 0.8125rem;
+  font-weight: var(--fw-medium);
+  line-height: 1.35;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+/* The "end-to-end encrypted" reassurance under the share QR. */
+.e2e-note {
+  margin-top: 0.35rem;
+}
+
 .hidden {
   display: none !important;
 }

@@ -3,7 +3,7 @@
 // Strategy: cache-first for our own GET assets, falling back to the network and
 // caching what it fetches. WebSocket sync traffic is untouched.
 
-const CACHE = "siano-shell-v62";
+const CACHE = "siano-shell-v63";
 
 // The operator debug flag (/env.js) must stay live (never cached) when online,
 // but it is a render-blocking classic <script> in index.html — so if it ever
@@ -44,6 +44,7 @@ const SHELL = [
   "/js/core/lamport.js",
   "/js/core/ops.js",
   "/js/core/reducer.js",
+  "/js/core/crypto.js",
   "/js/core/qrstream.js",
   "/js/store/idb.js",
   "/js/store/oplog.js",

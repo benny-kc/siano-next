@@ -34,11 +34,20 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { opId } from "../client/js/core/lamport.js";
 
-/** Minimal shape check so a malformed frame can never poison the dedup index. */
+/**
+ * Minimal shape check so a malformed frame can never poison the dedup index.
+ *
+ * Two shapes are valid:
+ *   - an ENCRYPTED envelope `{ e, id, k, iv, ct }` (crypto.js): the hub is blind
+ *     to its contents and only needs `id` (its dedup/relay key, via opId) and the
+ *     ciphertext `ct`. This is the normal shape from a modern client.
+ *   - a legacy PLAINTEXT op `{ op, lamport, device, … }` (insecure-context / old
+ *     client fallback), keyed by `lamport.device`.
+ */
 export function isValidOp(op) {
+  if (!op || typeof op !== "object") return false;
+  if (op.e) return typeof op.id === "string" && typeof op.ct === "string";
   return (
-    op &&
-    typeof op === "object" &&
     typeof op.op === "string" &&
     typeof op.lamport === "number" &&
     Number.isFinite(op.lamport) &&

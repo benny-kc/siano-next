@@ -93,6 +93,20 @@ caches a trip in memory and never re-reads the file, so they'd never see each
 other's live appends and could interleave writes; the peer link is the real
 mechanism.)
 
+### The encryption boundary (zero-knowledge hub)
+
+Ops are **end-to-end encrypted** so the hub — a dumb relay — never sees user data.
+The design keeps the pure core (reducer, snapshot, oplog) working on **plaintext**
+ops and encrypts only at the two edges where ops leave the device: the sync
+WebSocket (`sync/client.js`) and the offline-QR export. Each op becomes an
+**envelope** `{ e:1, id, k, iv, ct }` — a fresh per-op data key (DEK) seals the op
+JSON and the trip key (KEK) wraps the DEK (textbook *envelope* encryption). Only
+the op-id (`id`, a random uuid) stays in the clear, so the hub can dedup and
+negotiate the sync delta; everything else (type, amounts, names, device, lamport,
+vv) is inside `ct`. The KEK is transparent — it rides in the URL fragment
+(`/t/<id>#k=…`, never sent to the server) and is cached per device. See
+`client/js/core/crypto.js` and docs/security.md → *End-to-end encryption*.
+
 ## How merge actually works (the reducer)
 
 Each op carries causal metadata from its author's `Clock`
@@ -159,6 +173,7 @@ Defined in `client/js/core/ops.js`:
 | `client/js/core/lamport.js` | `Clock` (Lamport + version vector), `frontier`, `causallyAfter`, `compareOps`, `opId`. |
 | `client/js/core/ops.js` | The concrete op set + stamped constructors. |
 | `client/js/core/reducer.js` | `fold(tripId, ops) -> state`. The heart: OR-Set + LWW + money-conflict merge. |
+| `client/js/core/crypto.js` | End-to-end **envelope encryption** of ops (AES-256-GCM via Web Crypto): `genTripKey`/`importTripKey`/`makeTripCrypto`. Seals ops before they leave the device; the hub only ever holds ciphertext. |
 | `client/js/core/snapshot.js` | `buildSnapshot(state)` — the view the board renders. Ported from `Snapshot.build_snapshot`. |
 | `client/js/store/idb.js` | Tiny promise wrapper over IndexedDB (dependency-free; swap in Dexie later). |
 | `client/js/store/oplog.js` | `OpLog` (pure, testable) + `openTripStore` (IndexedDB-backed): the device's full copy. |
@@ -193,6 +208,13 @@ per peer that multiplexes every trip, reconciling the union of both hubs' trips
 on each (re)connect and streaming live edits after; token-authed and self-healing,
 it converges two hubs, a star, a chain, or a mesh; tested in `test/peer.test.mjs`.
 
+Also built: **end-to-end (envelope) encryption** (`client/js/core/crypto.js`) — ops
+are AES-256-GCM sealed on the device (per-op data key wrapped by a trip key carried
+transparently in the URL fragment), so the hub is a zero-knowledge relay that holds
+only ciphertext; tested in `test/crypto.test.mjs` and the encrypted-relay case in
+`test/hub.test.mjs`.
+
 **Next** (see `README.md` roadmap): the photo/OCR blob channel; per-device
-keypair signing of ops; log compaction (snapshot + tail) for long-lived trips;
-digest-based peer reconciliation for very large hubs.
+keypair signing of ops (tamper-evidence/authorship — encryption gives
+confidentiality, not authenticity); log compaction (snapshot + tail) for long-lived
+trips; digest-based peer reconciliation for very large hubs.
