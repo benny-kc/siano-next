@@ -267,6 +267,9 @@ export default {
   "onboard.tagSplit": "Dividir contas",
   "onboard.tagTrack": "Acompanhar custos",
   "onboard.tagSettle": "Acertar contas",
+  "onboard.next": "Seguinte",
+  "onboard.back": "Voltar",
+  "onboard.formTitle": "Configura a tua viagem",
   "onboard.travellerNameAria": ({ n }) => `Nome do viajante ${n}`,
 
   "osync.modalTitle": "📡 Sincronização offline",

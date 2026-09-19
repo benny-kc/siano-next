@@ -257,6 +257,9 @@ export default {
   "onboard.tagSplit": "비용 나누기",
   "onboard.tagTrack": "비용 추적",
   "onboard.tagSettle": "정산하기",
+  "onboard.next": "다음",
+  "onboard.back": "뒤로",
+  "onboard.formTitle": "여행 설정",
   "onboard.travellerNameAria": ({ n }) => `여행자 ${n} 이름`,
 
   "osync.modalTitle": "📡 오프라인 동기화",

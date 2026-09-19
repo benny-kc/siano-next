@@ -257,6 +257,9 @@ export default {
   "onboard.tagSplit": "割り勘",
   "onboard.tagTrack": "費用を記録",
   "onboard.tagSettle": "精算",
+  "onboard.next": "次へ",
+  "onboard.back": "戻る",
+  "onboard.formTitle": "旅行を設定",
   "onboard.travellerNameAria": ({ n }) => `旅行者 ${n} の名前`,
 
   "osync.modalTitle": "📡 オフライン同期",

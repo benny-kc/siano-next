@@ -306,6 +306,9 @@ export default {
   "onboard.tagSplit": "Dziel rachunki",
   "onboard.tagTrack": "Śledź koszty",
   "onboard.tagSettle": "Rozliczaj się",
+  "onboard.next": "Dalej",
+  "onboard.back": "Wstecz",
+  "onboard.formTitle": "Skonfiguruj wyjazd",
   "onboard.travellerNameAria": ({ n }) => `Imię: Podróżny ${n}`,
 
   // ── Offline sync ──────────────────────────────────────────────────────────────

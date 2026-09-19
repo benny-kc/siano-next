@@ -5,16 +5,24 @@
 // lets them seed the trip in one go — a trip name plus a handful of traveller
 // names — instead of discovering the Settings drawer on their own.
 //
+// TWO STEPS (see #onboard-modal in index.html, `data-step`): step "info" is the
+// welcome copy with NO input fields — so the whole screen stays readable and the
+// mobile keyboard never pops up over it — and a "Next" button; step "form" is
+// the trip-name + traveller fields with "Back" / "Later" / "Done". This split
+// fixed the complaint that the on-screen keyboard covered the tall one-screen
+// overlay on phones.
+//
 // It is a static shell in index.html (#onboard-modal, toggled by `.hidden` like
 // the confirm dialog, so it never flashes on first paint); this module only
-// fills in the dynamic traveller rows and wires the buttons. "Done" hands the
-// filled-in values back to app.js (which names the trip and adds the named
-// travellers as ops); "Later" — or the backdrop — just dismisses it. Either way
-// the overlay is a one-shot for this boot: dismissing it never reopens it.
+// fills in the dynamic traveller rows, flips between the two steps, and wires
+// the buttons. "Done" hands the filled-in values back to app.js (which names the
+// trip and adds the named travellers as ops); "Later" — or the backdrop — just
+// dismisses it. Either way the overlay is a one-shot for this boot: dismissing
+// it never reopens it.
 
 import { t } from "./i18n.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/onboarding.js", 4);
+registerVersion("js/ui/onboarding.js", 5);
 
 const START_ROWS = 3; // a few empty name fields to invite more than one traveller
 const MAX_ROWS = 24; // a soft cap so "+" can't spawn an unbounded list
@@ -57,12 +65,15 @@ export function showOnboarding({ onDone, force = false } = {}) {
   const modal = document.getElementById("onboard-modal");
   if (!modal || (modal.dataset.shown === "1" && !force)) return;
   modal.dataset.shown = "1";
+  modal.dataset.step = "info"; // always open on the welcome step
   const ac = new AbortController();
   const on = (el, ev, fn) => el.addEventListener(ev, fn, { signal: ac.signal });
 
   const tripInput = modal.querySelector("#onboard-trip");
   const people = modal.querySelector("#onboard-people");
   const addBtn = modal.querySelector("#onboard-add");
+  const nextBtn = modal.querySelector("#onboard-next");
+  const backBtn = modal.querySelector("#onboard-back");
   const laterBtn = modal.querySelector("#onboard-later");
   const doneBtn = modal.querySelector("#onboard-done");
   const backdrop = modal.querySelector(".onboard-backdrop");
@@ -93,6 +104,11 @@ export function showOnboarding({ onDone, force = false } = {}) {
     close();
     if (typeof onDone === "function") onDone({ tripName, names });
   };
+
+  // Step navigation. "Next" reveals the form step; "Back" returns to the info
+  // step. Deliberately no auto-focus on advancing — see the reveal note below.
+  on(nextBtn, "click", () => { modal.dataset.step = "form"; });
+  on(backBtn, "click", () => { modal.dataset.step = "info"; });
 
   on(addBtn, "click", addRow);
   on(laterBtn, "click", close);

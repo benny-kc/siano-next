@@ -267,6 +267,9 @@ export default {
   "onboard.tagSplit": "Partager l’addition",
   "onboard.tagTrack": "Suivre les frais",
   "onboard.tagSettle": "Régler les comptes",
+  "onboard.next": "Suivant",
+  "onboard.back": "Retour",
+  "onboard.formTitle": "Configurez votre voyage",
   "onboard.travellerNameAria": ({ n }) => `Nom du voyageur ${n}`,
 
   "osync.modalTitle": "📡 Synchronisation hors ligne",

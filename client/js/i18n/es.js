@@ -267,6 +267,9 @@ export default {
   "onboard.tagSplit": "Divide cuentas",
   "onboard.tagTrack": "Controla gastos",
   "onboard.tagSettle": "Salda cuentas",
+  "onboard.next": "Siguiente",
+  "onboard.back": "Atrás",
+  "onboard.formTitle": "Configura tu viaje",
   "onboard.travellerNameAria": ({ n }) => `Nombre del viajero ${n}`,
 
   "osync.modalTitle": "📡 Sincronización sin conexión",

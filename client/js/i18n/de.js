@@ -267,6 +267,9 @@ export default {
   "onboard.tagSplit": "Rechnungen teilen",
   "onboard.tagTrack": "Kosten verfolgen",
   "onboard.tagSettle": "Abrechnen",
+  "onboard.next": "Weiter",
+  "onboard.back": "Zurück",
+  "onboard.formTitle": "Reise einrichten",
   "onboard.travellerNameAria": ({ n }) => `Name Reisender ${n}`,
 
   "osync.modalTitle": "📡 Offline-Sync",

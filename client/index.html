@@ -508,56 +508,77 @@
          seeds the trip name + a few travellers in one go. Static shell here,
          hidden by `.hidden` so it never flashes on first paint; the dynamic
          traveller rows and wiring live in js/ui/onboarding.js. -->
-    <div id="onboard-modal" class="hidden">
+    <!-- Two steps, toggled by `data-step` on the modal (set by onboarding.js):
+         "info" = the welcome copy with NO input fields (so the whole screen is
+         readable, no keyboard popping); "form" = the trip-name + traveller
+         fields. This split fixed the mobile complaint that the keyboard covered
+         the tall single-screen overlay. -->
+    <div id="onboard-modal" class="hidden" data-step="info">
       <div class="onboard-backdrop"></div>
       <div class="onboard-panel" role="dialog" aria-modal="true" aria-labelledby="onboard-title">
-        <div class="onboard-head">
-          <div class="onboard-badge" aria-hidden="true">🧳</div>
-          <h2 id="onboard-title" data-i18n="onboard.title">Welcome to Siano!</h2>
-          <p class="onboard-about" data-i18n="onboard.about">
-            Siano is a bill-splitter for group trips — share costs, track who
-            paid for what, and settle up fairly at the end.
-          </p>
-          <div class="onboard-tags">
-            <span class="onboard-tag" data-i18n="onboard.tagSplit">Split bills</span>
-            <span class="onboard-tag" data-i18n="onboard.tagTrack">Track costs</span>
-            <span class="onboard-tag" data-i18n="onboard.tagSettle">Settle up</span>
+
+        <!-- STEP 1 — welcome / "what is this", no inputs -->
+        <div class="onboard-step onboard-step-info">
+          <div class="onboard-head">
+            <div class="onboard-badge" aria-hidden="true">🧳</div>
+            <h2 id="onboard-title" data-i18n="onboard.title">Welcome to Siano!</h2>
+            <p class="onboard-about" data-i18n="onboard.about">
+              Siano is a bill-splitter for group trips — share costs, track who
+              paid for what, and settle up fairly at the end.
+            </p>
+            <div class="onboard-tags">
+              <span class="onboard-tag" data-i18n="onboard.tagSplit">Split bills</span>
+              <span class="onboard-tag" data-i18n="onboard.tagTrack">Track costs</span>
+              <span class="onboard-tag" data-i18n="onboard.tagSettle">Settle up</span>
+            </div>
+            <p class="onboard-lede" data-i18n="onboard.lede">
+              First time here? Start by naming your trip and the fellow travellers
+              coming along — like this. You can change any of it later.
+            </p>
           </div>
-          <p class="onboard-lede" data-i18n="onboard.lede">
-            First time here? Start by naming your trip and the fellow travellers
-            coming along — like this. You can change any of it later.
-          </p>
-        </div>
-        <div class="onboard-body">
-          <label class="onboard-field">
-            <span class="onboard-label" data-i18n="onboard.tripLabel">Trip name</span>
-            <input
-              id="onboard-trip"
-              type="search"
-              class="onboard-input"
-              placeholder="e.g. Italy 2026"
-              aria-label="Trip name"
-              data-i18n-attr="placeholder:onboard.tripPlaceholder;aria-label:onboard.tripAria"
-              autocomplete="off"
-              autocorrect="off"
-              spellcheck="false"
-              autocapitalize="words"
-              data-lpignore="true"
-              data-1p-ignore="true"
-              data-form-type="other"
-            />
-          </label>
-          <div class="onboard-field">
-            <span class="onboard-label" data-i18n="onboard.travellersLabel">Travellers</span>
-            <!-- Traveller name rows are inserted here by onboarding.js. -->
-            <div id="onboard-people" class="onboard-people"></div>
-            <button type="button" id="onboard-add" class="onboard-add" data-i18n="onboard.addAnother">＋ Add another traveller</button>
+          <div class="onboard-actions">
+            <button type="button" id="onboard-next" class="onboard-done onboard-next" data-i18n="onboard.next">Next</button>
           </div>
         </div>
-        <div class="onboard-actions">
-          <button type="button" id="onboard-later" class="onboard-later" data-i18n="onboard.later">Later</button>
-          <button type="button" id="onboard-done" class="onboard-done" data-i18n="onboard.done">Done</button>
+
+        <!-- STEP 2 — the trip-name + traveller fields -->
+        <div class="onboard-step onboard-step-form">
+          <div class="onboard-head onboard-head--form">
+            <h2 class="onboard-form-title" data-i18n="onboard.formTitle">Set up your trip</h2>
+          </div>
+          <div class="onboard-body">
+            <label class="onboard-field">
+              <span class="onboard-label" data-i18n="onboard.tripLabel">Trip name</span>
+              <input
+                id="onboard-trip"
+                type="search"
+                class="onboard-input"
+                placeholder="e.g. Italy 2026"
+                aria-label="Trip name"
+                data-i18n-attr="placeholder:onboard.tripPlaceholder;aria-label:onboard.tripAria"
+                autocomplete="off"
+                autocorrect="off"
+                spellcheck="false"
+                autocapitalize="words"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-form-type="other"
+              />
+            </label>
+            <div class="onboard-field">
+              <span class="onboard-label" data-i18n="onboard.travellersLabel">Travellers</span>
+              <!-- Traveller name rows are inserted here by onboarding.js. -->
+              <div id="onboard-people" class="onboard-people"></div>
+              <button type="button" id="onboard-add" class="onboard-add" data-i18n="onboard.addAnother">＋ Add another traveller</button>
+            </div>
+          </div>
+          <div class="onboard-actions">
+            <button type="button" id="onboard-back" class="onboard-back" data-i18n="onboard.back">Back</button>
+            <button type="button" id="onboard-later" class="onboard-later" data-i18n="onboard.later">Later</button>
+            <button type="button" id="onboard-done" class="onboard-done" data-i18n="onboard.done">Done</button>
+          </div>
         </div>
+
       </div>
     </div>
 
