@@ -276,6 +276,9 @@ export default {
   "onboard.tagSplit": "تقسيم الفواتير",
   "onboard.tagTrack": "تتبّع التكاليف",
   "onboard.tagSettle": "تسوية الحسابات",
+  "onboard.next": "التالي",
+  "onboard.back": "رجوع",
+  "onboard.formTitle": "إعداد رحلتك",
   "onboard.travellerNameAria": ({ n }) => `اسم المسافر ${n}`,
 
   "osync.modalTitle": "📡 مزامنة دون اتصال",

@@ -257,6 +257,9 @@ export default {
   "onboard.tagSplit": "分摊账单",
   "onboard.tagTrack": "记录费用",
   "onboard.tagSettle": "结算",
+  "onboard.next": "下一步",
+  "onboard.back": "返回",
+  "onboard.formTitle": "设置你的行程",
   "onboard.travellerNameAria": ({ n }) => `旅行者 ${n} 的姓名`,
 
   "osync.modalTitle": "📡 离线同步",

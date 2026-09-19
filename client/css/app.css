@@ -2413,11 +2413,32 @@ table.report .tone-zero {
   background: var(--slate-900);
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6);
 }
+/* Two-step flow: only the step matching the modal's data-step is shown. Each
+   step is its own flex column (head fixed / body scrolls / actions fixed) inside
+   the panel, so a tall form scrolls without pushing the buttons off-screen. */
+.onboard-step {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 88vh;
+}
+#onboard-modal[data-step="info"] .onboard-step-form { display: none; }
+#onboard-modal[data-step="form"] .onboard-step-info { display: none; }
 .onboard-head {
   flex-shrink: 0;
   padding: 1.5rem 1.25rem 1rem;
   text-align: center;
   border-bottom: 1px solid var(--slate-800);
+}
+/* Step 1 (info) ends in its actions row, so its head needs no divider. */
+.onboard-step-info .onboard-head { border-bottom: none; }
+/* Step 2 (form) head is just a compact title above the fields. */
+.onboard-head--form { padding-bottom: 0.75rem; }
+.onboard-head--form h2 {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: var(--fw-black);
+  color: var(--slate-100, var(--slate-200));
 }
 .onboard-badge {
   font-size: 2.25rem;
@@ -2550,6 +2571,24 @@ table.report .tone-zero {
 }
 .onboard-done:hover {
   background: var(--amber-400, #fbbf24);
+}
+/* Step 1's single "Next" button spans the full action row (primary CTA). */
+.onboard-step-info .onboard-actions { justify-content: stretch; }
+.onboard-next { flex: 1; text-align: center; }
+/* Step 2's "Back" sits at the far left; "Later"/"Done" stay grouped right. */
+.onboard-back {
+  margin-right: auto;
+  border: none;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--slate-400);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: var(--fw-semibold);
+}
+.onboard-back:hover {
+  color: var(--slate-200);
+  background: var(--slate-800);
 }
 
 /* ── Transient toast ("monit") ────────────────────────────────────────────── */
