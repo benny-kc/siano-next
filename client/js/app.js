@@ -33,7 +33,7 @@ import { debugEnabled, setDebugEnabled } from "./ui/debug.js";
 import { applyI18n, setLocalePref, t, activeLocale } from "./ui/i18n.js";
 import { dlog, derror } from "./log.js";
 import { registerVersion } from "./version.js";
-registerVersion("js/app.js", 9);
+registerVersion("js/app.js", 11);
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const EMOJIS = ["🍽️", "🍕", "🍔", "🍜", "🍣", "🥘", "🍰", "🍺", "🍷", "☕", "🛒", "🚕", "🏨", "🎟️", "⛽", "🍦"];
@@ -359,7 +359,9 @@ async function main() {
     // onboardingPreviewSection + ui/onboarding.js (`force`).
     previewOnboarding: () => {
       toast(t("app.toast.onboardingSoon"));
-      setTimeout(() => showOnboarding({ onDone: seedFromOnboarding, force: true }), 5000);
+      // Use the SAME handlers as the real first run (welcomeOpts) so the preview
+      // faithfully exercises skip -> demo / Done -> real trip, not a stub.
+      setTimeout(() => showOnboarding(welcomeOpts(true)), 5000);
     },
 
     // PWA install: replay Chromium's captured prompt (must run from this click).
@@ -474,22 +476,37 @@ async function main() {
   };
   // If the newcomer skips ("Later"/backdrop) or taps Done having entered nothing,
   // don't strand them on an empty board: seed a demo trip (5 travellers + 7 bills
-  // in their locale) so the whole interface has something to explore, and pan to
-  // the one bill left open. Guarded on an empty log so we never clobber real data.
-  const seedDemoIfEmpty = () => {
-    if (log.allOps().length !== 0) return;
-    const openId = seedDemoTrip(log, { locale: activeLocale(), palette: PALETTE, center: viewCenter() });
-    if (openId && interactions) interactions.panToMeal(openId);
+  // in their locale) so the whole interface has something to explore. If the
+  // current trip is still empty (the normal first-run case) we fill it in place
+  // and pan to the one open bill; otherwise — e.g. replaying the welcome from the
+  // Settings "Preview" button on a trip that already has data — we mint a NEW
+  // demo trip and open it, so demo data is never mixed into a real trip.
+  const seedDemo = async () => {
+    if (log.allOps().length === 0) {
+      const openId = seedDemoTrip(log, { locale: activeLocale(), palette: PALETTE, center: viewCenter() });
+      if (openId && interactions) interactions.panToMeal(openId);
+      return;
+    }
+    const id = uid("trip-");
+    const store = await openTripStore(id, { minted: true });
+    seedDemoTrip(store, { locale: activeLocale(), palette: PALETTE });
+    const tok = store.keyToken;
+    rememberTrip(id, store.snapshot().name || "");
+    await store.flush(); // ensure every seeded op is on disk before we navigate away
+    location.assign(`/t/${encodeURIComponent(id)}${tok ? `#k=${encodeURIComponent(tok)}` : ""}`);
   };
-  if (firstTime) {
-    showOnboarding({
-      onDone: ({ tripName, names }) => {
-        if (tripName || names.length) seedFromOnboarding({ tripName, names });
-        else seedDemoIfEmpty();
-      },
-      onLater: seedDemoIfEmpty,
-    });
-  }
+  // Welcome-overlay handlers shared by the first-run trigger and the temporary
+  // Settings "Preview welcome screen" button. Done-with-input seeds a real trip;
+  // skipping (or Done with nothing) seeds the demo.
+  const welcomeOpts = (force = false) => ({
+    onDone: ({ tripName, names }) => {
+      if (tripName || names.length) seedFromOnboarding({ tripName, names });
+      else seedDemo();
+    },
+    onLater: seedDemo,
+    force,
+  });
+  if (firstTime) showOnboarding(welcomeOpts());
 
   // Top-bar + primary "add meal" button.
   document.getElementById("add-meal").addEventListener("click", actions.addMeal);

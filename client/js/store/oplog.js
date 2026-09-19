@@ -15,7 +15,7 @@ import { buildSnapshot } from "../core/snapshot.js";
 import { genTripKey, subtleAvailable } from "../core/crypto.js";
 import { openDb, get, put, putMany, getAll } from "./idb.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/store/oplog.js", 2);
+registerVersion("js/store/oplog.js", 3);
 
 function newDeviceId() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
@@ -179,12 +179,18 @@ export async function openTripStore(tripId, opts = {}) {
   log.ingestMany(stored.map((r) => r.op), { silent: true }); // no listeners yet, don't re-broadcast
 
   // Persist every new op + the advancing clock. Fire-and-forget; IndexedDB
-  // serializes writes per store so ordering within a store is preserved.
+  // serializes writes per store so ordering within a store is preserved. We keep
+  // a handle on the latest ops write so a caller can `await log.flush()` before
+  // doing something that abandons the page (e.g. navigating to a freshly-seeded
+  // trip) — awaiting the last transaction implies the earlier queued ones on the
+  // same store have also committed.
+  let lastWrite = Promise.resolve();
   log.subscribe(({ ops }) => {
-    putMany(db, "ops", ops.map((op) => ({ _id: opId(op), op }))).catch((e) =>
+    lastWrite = putMany(db, "ops", ops.map((op) => ({ _id: opId(op), op }))).catch((e) =>
       console.error("siano: failed to persist ops", e));
     put(db, "meta", log.clock.toJSON(), "clock").catch(() => {});
   });
+  log.flush = () => lastWrite;
 
   return log;
 }
