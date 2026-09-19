@@ -14,7 +14,7 @@
 
 import { t } from "./i18n.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/onboarding.js", 3);
+registerVersion("js/ui/onboarding.js", 4);
 
 const START_ROWS = 3; // a few empty name fields to invite more than one traveller
 const MAX_ROWS = 24; // a soft cap so "+" can't spawn an unbounded list
@@ -112,9 +112,13 @@ export function showOnboarding({ onDone, force = false } = {}) {
   });
 
   // Reveal (mirrors the confirm dialog: drop `.hidden`, then fade opacity in).
+  // Deliberately DON'T auto-focus the trip-name field: on mobile, focusing an
+  // input pops the on-screen keyboard, which covers the lower half of this
+  // already-tall overlay so the welcome copy + traveller fields aren't fully
+  // visible. Let the user read the screen first; the keyboard only appears once
+  // they tap a field themselves.
   modal.classList.remove("hidden");
   requestAnimationFrame(() => {
     modal.style.opacity = "1";
-    tripInput.focus();
   });
 }
