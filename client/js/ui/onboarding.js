@@ -22,7 +22,7 @@
 
 import { t } from "./i18n.js";
 import { registerVersion } from "../version.js";
-registerVersion("js/ui/onboarding.js", 5);
+registerVersion("js/ui/onboarding.js", 6);
 
 const START_ROWS = 3; // a few empty name fields to invite more than one traveller
 const MAX_ROWS = 24; // a soft cap so "+" can't spawn an unbounded list
@@ -50,18 +50,19 @@ function personRow(n) {
 }
 
 /**
- * Show the first-run overlay. `onDone({ tripName, names })` is called only when
- * the user taps "Done": `tripName` is the trimmed trip name (may be ""), `names`
- * is the list of non-blank traveller names in order. "Later" / backdrop dismiss
- * without calling back. Idempotent per boot — a second call while it's open is a
- * no-op.
+ * Show the first-run overlay. `onDone({ tripName, names })` is called when the
+ * user taps "Done": `tripName` is the trimmed trip name (may be ""), `names` is
+ * the list of non-blank traveller names in order. `onLater()` is called when the
+ * user dismisses without committing anything — the "Later" button or the
+ * backdrop — which app.js uses to seed a demo trip so a skipper isn't left on an
+ * empty board. Idempotent per boot — a second call while it's open is a no-op.
  *
  * `force: true` bypasses the once-per-boot guard so the overlay can be replayed
  * on demand (the temporary "Preview welcome screen" button in Settings). Each
  * call wires its listeners through an AbortController that `close()` aborts, so
  * a replay never stacks duplicate handlers on the shared buttons.
  */
-export function showOnboarding({ onDone, force = false } = {}) {
+export function showOnboarding({ onDone, onLater, force = false } = {}) {
   const modal = document.getElementById("onboard-modal");
   if (!modal || (modal.dataset.shown === "1" && !force)) return;
   modal.dataset.shown = "1";
@@ -105,15 +106,26 @@ export function showOnboarding({ onDone, force = false } = {}) {
     if (typeof onDone === "function") onDone({ tripName, names });
   };
 
+  // "Later" / backdrop: dismiss without committing anything, then let app.js
+  // decide what to do with an empty trip (it seeds a demo). Guard so onLater
+  // fires at most once even if both close paths race.
+  let dismissed = false;
+  const dismiss = () => {
+    if (dismissed) return;
+    dismissed = true;
+    close();
+    if (typeof onLater === "function") onLater();
+  };
+
   // Step navigation. "Next" reveals the form step; "Back" returns to the info
   // step. Deliberately no auto-focus on advancing — see the reveal note below.
   on(nextBtn, "click", () => { modal.dataset.step = "form"; });
   on(backBtn, "click", () => { modal.dataset.step = "info"; });
 
   on(addBtn, "click", addRow);
-  on(laterBtn, "click", close);
+  on(laterBtn, "click", dismiss);
   on(doneBtn, "click", done);
-  on(backdrop, "click", close);
+  on(backdrop, "click", dismiss);
   // Enter in the trip name jumps to the first traveller; Enter in the last
   // traveller row adds another — a keyboard-only path through the form.
   on(tripInput, "keydown", (e) => {
