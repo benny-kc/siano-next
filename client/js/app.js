@@ -28,11 +28,12 @@ import { applyTypography, setFont, stepScale, stepWeight, setTheme, resetTypogra
 import { installFullscreen, fullscreenPreferred, setFullscreenPreferred } from "./ui/fullscreen.js";
 import { initInstall, promptInstall } from "./ui/install.js";
 import { showOnboarding } from "./ui/onboarding.js";
+import { seedDemoTrip } from "./demo.js";
 import { debugEnabled, setDebugEnabled } from "./ui/debug.js";
-import { applyI18n, setLocalePref, t } from "./ui/i18n.js";
+import { applyI18n, setLocalePref, t, activeLocale } from "./ui/i18n.js";
 import { dlog, derror } from "./log.js";
 import { registerVersion } from "./version.js";
-registerVersion("js/app.js", 8);
+registerVersion("js/app.js", 9);
 
 const PALETTE = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const EMOJIS = ["🍽️", "🍕", "🍔", "🍜", "🍣", "🥘", "🍰", "🍺", "🍷", "☕", "🛒", "🚕", "🏨", "🎟️", "⛽", "🍦"];
@@ -463,16 +464,31 @@ async function main() {
 
   // First-run welcome: greet a newcomer on a fresh device and let them seed the
   // trip in one go. "Done" names the trip and adds the named travellers as ops
-  // (empty names are skipped; a blank trip name is left as-is); "Later" just
-  // dismisses. Emitting these ops flows through the normal subscribe -> repaint
-  // path, so the board fills in behind the fading overlay. The same seed handler
-  // backs the temporary Settings "Preview welcome screen" button.
+  // (empty names are skipped; a blank trip name is left as-is). Emitting these
+  // ops flows through the normal subscribe -> repaint path, so the board fills in
+  // behind the fading overlay. The same seed handler backs the temporary Settings
+  // "Preview welcome screen" button.
   const seedFromOnboarding = ({ tripName, names }) => {
     if (tripName) actions.setTripName(tripName);
     for (const name of names) actions.addMember(name);
   };
+  // If the newcomer skips ("Later"/backdrop) or taps Done having entered nothing,
+  // don't strand them on an empty board: seed a demo trip (5 travellers + 7 bills
+  // in their locale) so the whole interface has something to explore, and pan to
+  // the one bill left open. Guarded on an empty log so we never clobber real data.
+  const seedDemoIfEmpty = () => {
+    if (log.allOps().length !== 0) return;
+    const openId = seedDemoTrip(log, { locale: activeLocale(), palette: PALETTE, center: viewCenter() });
+    if (openId && interactions) interactions.panToMeal(openId);
+  };
   if (firstTime) {
-    showOnboarding({ onDone: seedFromOnboarding });
+    showOnboarding({
+      onDone: ({ tripName, names }) => {
+        if (tripName || names.length) seedFromOnboarding({ tripName, names });
+        else seedDemoIfEmpty();
+      },
+      onLater: seedDemoIfEmpty,
+    });
   }
 
   // Top-bar + primary "add meal" button.
